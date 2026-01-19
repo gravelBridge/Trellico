@@ -163,3 +163,9 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Reduce gap around horizontal rules in prose */
+.prose hr {
+  margin-top: 1em;
+  margin-bottom: 1em;
+}

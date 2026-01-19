@@ -1,12 +1,15 @@
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_decorum::WebviewWindowExt;
 
 static PROCESS_RUNNING: AtomicBool = AtomicBool::new(false);
+static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
+static MASTER_PTY: Mutex<Option<Box<dyn MasterPty + Send>>> = Mutex::new(None);
 
 #[tauri::command]
 fn setup_folder(folder_path: String) -> Result<(), String> {
@@ -19,16 +22,29 @@ fn setup_folder(folder_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn run_claude(app: AppHandle, message: String, folder_path: String) -> Result<(), String> {
+async fn run_claude(
+    app: AppHandle,
+    message: String,
+    folder_path: String,
+    session_id: Option<String>,
+) -> Result<(), String> {
     if PROCESS_RUNNING.swap(true, Ordering::SeqCst) {
         return Err("A process is already running".to_string());
     }
 
+    // Reset stop flag
+    STOP_REQUESTED.store(false, Ordering::SeqCst);
+
     let app_clone = app.clone();
 
     std::thread::spawn(move || {
-        let result = run_claude_process(&app_clone, &message, &folder_path);
+        let result = run_claude_process(&app_clone, &message, &folder_path, session_id.as_deref());
         PROCESS_RUNNING.store(false, Ordering::SeqCst);
+
+        // Clear the master PTY
+        if let Ok(mut master) = MASTER_PTY.lock() {
+            *master = None;
+        }
 
         match result {
             Ok(code) => {
@@ -43,7 +59,27 @@ async fn run_claude(app: AppHandle, message: String, folder_path: String) -> Res
     Ok(())
 }
 
-fn run_claude_process(app: &AppHandle, message: &str, folder_path: &str) -> Result<i32, String> {
+#[tauri::command]
+fn stop_claude() -> Result<(), String> {
+    STOP_REQUESTED.store(true, Ordering::SeqCst);
+
+    // Drop the master PTY to close the connection and signal EOF to the child
+    if let Ok(mut master) = MASTER_PTY.lock() {
+        *master = None;
+    }
+
+    // Reset the running flag so new processes can start
+    PROCESS_RUNNING.store(false, Ordering::SeqCst);
+
+    Ok(())
+}
+
+fn run_claude_process(
+    app: &AppHandle,
+    message: &str,
+    folder_path: &str,
+    session_id: Option<&str>,
+) -> Result<i32, String> {
     let pty_system = native_pty_system();
 
     let pair = pty_system
@@ -56,7 +92,17 @@ fn run_claude_process(app: &AppHandle, message: &str, folder_path: &str) -> Resu
         .map_err(|e| format!("Failed to open pty: {}", e))?;
 
     let mut cmd = CommandBuilder::new("claude");
-    cmd.args(["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", message]);
+
+    // Build args based on whether we're resuming a session
+    let mut args: Vec<&str> = vec!["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"];
+
+    if let Some(sid) = session_id {
+        args.push("--resume");
+        args.push(sid);
+    }
+
+    args.push(message);
+    cmd.args(&args);
     cmd.cwd(folder_path);
 
     let mut child = pair
@@ -73,9 +119,19 @@ fn run_claude_process(app: &AppHandle, message: &str, folder_path: &str) -> Resu
         .try_clone_reader()
         .map_err(|e| format!("Failed to clone reader: {}", e))?;
 
+    // Store master PTY for potential cancellation
+    if let Ok(mut master) = MASTER_PTY.lock() {
+        *master = Some(pair.master);
+    }
+
     // Stream output in real-time
     let mut buf = [0u8; 256];
     loop {
+        // Check if stop was requested
+        if STOP_REQUESTED.load(Ordering::SeqCst) {
+            break;
+        }
+
         match reader.read(&mut buf) {
             Ok(0) => break, // EOF
             Ok(n) => {
@@ -110,7 +166,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_decorum::init())
-        .invoke_handler(tauri::generate_handler![run_claude, setup_folder])
+        .invoke_handler(tauri::generate_handler![run_claude, stop_claude, setup_folder])
         .setup(|app| {
             let main_window = app.get_webview_window("main").unwrap();
 

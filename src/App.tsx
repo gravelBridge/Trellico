@@ -56,6 +56,7 @@ function App() {
   const [messages, setMessages] = useState<ClaudeMessage[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState("plans");
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bufferRef = useRef("");
   const shouldAutoScroll = useRef(true);
@@ -79,6 +80,10 @@ function App() {
           if (!trimmed) continue;
           try {
             const parsed = JSON.parse(trimmed) as ClaudeMessage;
+            // Extract session ID from init message
+            if (parsed.type === "system" && parsed.subtype === "init" && parsed.session_id) {
+              setSessionId(parsed.session_id);
+            }
             setMessages((prev) => [...prev, parsed]);
           } catch {
             // Not valid JSON, ignore
@@ -164,22 +169,46 @@ function App() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (message.trim() && folderPath && !isRunning) {
-      setMessages([]);
+      const isNewSession = !sessionId;
+
+      // Add user message to UI
+      setMessages((prev) => [...prev, { type: "user", content: message }]);
+
       bufferRef.current = "";
       shouldAutoScroll.current = true;
       setIsRunning(true);
 
-      const fullMessage = activeTab === "plans"
+      // Only prepend prompt for new sessions in plans tab
+      const fullMessage = isNewSession && activeTab === "plans"
         ? `${prdPrompt}\n\n${message}`
         : message;
 
       try {
-        await invoke("run_claude", { message: fullMessage, folderPath });
+        await invoke("run_claude", {
+          message: fullMessage,
+          folderPath,
+          sessionId,
+        });
       } catch (err) {
-        setMessages([{ type: "system", content: `Error: ${err}` }]);
+        setMessages((prev) => [...prev, { type: "system", content: `Error: ${err}` }]);
         setIsRunning(false);
       }
       setMessage("");
+    }
+  }
+
+  function startNewPlan() {
+    setMessages([]);
+    setSessionId(null);
+    setMessage("");
+  }
+
+  async function stopClaude() {
+    try {
+      await invoke("stop_claude");
+      setIsRunning(false);
+    } catch (err) {
+      console.error("Failed to stop Claude:", err);
     }
   }
 
@@ -249,7 +278,11 @@ function App() {
         if (!content?.trim()) {
           return null;
         }
-        return null; // Don't show user messages, they typed it
+        return (
+          <div key={index} className="text-sm text-muted-foreground select-text">
+            {content}
+          </div>
+        );
       }
       case "tool_result": {
         const output = msg.content || msg.result || "";
@@ -265,24 +298,8 @@ function App() {
           </details>
         );
       }
-      case "result": {
-        // Skip the text since it duplicates the assistant message, just show metadata
-        if (msg.total_cost_usd === undefined) return null;
-
-        // Check if previous content ended with a code block
-        const prevAssistant = [...messages].reverse().find(m => m.type === "assistant" && m.message?.content);
-        const prevText = prevAssistant?.message?.content?.filter(c => c.type === "text").map(c => c.text).join("") || "";
-        const endsWithCodeBlock = /```[^`]*$/.test(prevText.trim());
-
-        return (
-          <p key={index} className={cn(
-            "text-[11px] text-muted-foreground pt-2 border-t w-fit select-text",
-            endsWithCodeBlock ? "!-mt-2" : "!-mt-4"
-          )}>
-            ${msg.total_cost_usd.toFixed(4)} · {((msg.duration_ms || 0) / 1000).toFixed(1)}s
-          </p>
-        );
-      }
+      case "result":
+        return null;
       case "system":
         // Only show errors, not exit messages
         if (!msg.content?.startsWith("Error:")) return null;
@@ -324,25 +341,33 @@ function App() {
               }
             }
           }}
-          placeholder="Ask anything..."
+          placeholder={sessionId ? "Follow up..." : "Ask anything..."}
           rows={3}
           autoFocus
-          disabled={isRunning}
           className="resize-none text-base bg-background pr-12"
         />
         <button
-          type="submit"
-          disabled={!message.trim() || isRunning}
+          type={isRunning ? "button" : "submit"}
+          onClick={isRunning ? stopClaude : undefined}
+          disabled={!isRunning && !message.trim()}
           className={cn(
-            "absolute bottom-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-colors",
-            message.trim() && !isRunning
+            "absolute bottom-2 right-2 w-7 h-7 rounded-full flex items-center justify-center transition-colors",
+            isRunning
               ? "bg-primary text-primary-foreground hover:bg-primary/90"
-              : "bg-muted text-muted-foreground"
+              : message.trim()
+                ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                : "bg-muted text-muted-foreground"
           )}
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M8 12V4M4 8l4-4 4 4" />
-          </svg>
+          {isRunning ? (
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+              <rect x="1" y="1" width="10" height="10" rx="1" />
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 12V4M4 8l4-4 4 4" />
+            </svg>
+          )}
         </button>
       </div>
     </form>
@@ -378,8 +403,20 @@ function App() {
                 <TabsTrigger value="plans" className="flex-1">Plans</TabsTrigger>
                 <TabsTrigger value="agents" className="flex-1">Agents</TabsTrigger>
               </TabsList>
-              <TabsContent value="plans" className="mt-4">
-                <p className="text-sm text-muted-foreground px-1">No plans yet</p>
+              <TabsContent value="plans" className="mt-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start gap-2 hover:bg-muted"
+                  onClick={startNewPlan}
+                  disabled={isRunning}
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M8 3v10M3 8h10" />
+                  </svg>
+                  New plan
+                </Button>
+                <p className="text-sm text-muted-foreground px-1 mt-2">No plans yet</p>
               </TabsContent>
               <TabsContent value="agents" className="mt-4">
                 <p className="text-sm text-muted-foreground px-1">No agents yet</p>
@@ -439,22 +476,30 @@ function App() {
                   placeholder={activeTab === "plans" ? "What do you want to do?" : "Ask anything..."}
                   rows={5}
                   autoFocus
-                  disabled={isRunning}
                   className="resize-none text-base bg-background pr-12"
                 />
                 <button
-                  type="submit"
-                  disabled={!message.trim() || isRunning}
+                  type={isRunning ? "button" : "submit"}
+                  onClick={isRunning ? stopClaude : undefined}
+                  disabled={!isRunning && !message.trim()}
                   className={cn(
-                    "absolute bottom-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-colors",
-                    message.trim() && !isRunning
-                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                      : "bg-muted text-muted-foreground"
+                    "absolute bottom-2 right-2 w-7 h-7 rounded-full flex items-center justify-center transition-colors",
+                    isRunning
+                      ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      : message.trim()
+                        ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                        : "bg-muted text-muted-foreground"
                   )}
                 >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M8 12V4M4 8l4-4 4 4" />
-                  </svg>
+                  {isRunning ? (
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                      <rect x="1" y="1" width="10" height="10" rx="1" />
+                    </svg>
+                  ) : (
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M8 12V4M4 8l4-4 4 4" />
+                    </svg>
+                  )}
                 </button>
               </div>
             </form>
@@ -462,7 +507,7 @@ function App() {
         ) : (
           <>
             <div className={`flex-1 overflow-auto select-none scroll-container ${showScrollbar ? "is-scrolling" : ""}`} ref={scrollRef} onScroll={handleScroll}>
-              <div className="max-w-3xl mx-auto px-6 pt-8 pb-4 space-y-6 overflow-hidden">
+              <div className="max-w-3xl mx-auto px-6 pt-0 pb-4 space-y-3 overflow-hidden">
                 {messages.map((msg, i) => renderMessage(msg, i))}
               </div>
             </div>
