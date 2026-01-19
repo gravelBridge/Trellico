@@ -1,17 +1,43 @@
-use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher, EventKind};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use std::collections::HashSet;
+use std::sync::LazyLock;
 use std::fs;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_decorum::WebviewWindowExt;
+use chrono::Utc;
 
 static PROCESS_RUNNING: AtomicBool = AtomicBool::new(false);
 static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static MASTER_PTY: Mutex<Option<Box<dyn MasterPty + Send>>> = Mutex::new(None);
 static PLANS_WATCHER: Mutex<Option<RecommendedWatcher>> = Mutex::new(None);
+
+// Session-Plan linking types
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+struct SessionPlanLink {
+    session_id: String,
+    plan_file_name: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct SessionLinksStore {
+    version: u32,
+    links: Vec<SessionPlanLink>,
+}
+
+// Plan change event type
+#[derive(serde::Serialize, Clone)]
+struct PlanChangeEvent {
+    change_type: String,  // "created" | "modified" | "removed" | "renamed"
+    file_name: String,
+    old_file_name: Option<String>,
+}
 
 #[tauri::command]
 fn setup_folder(folder_path: String) -> Result<(), String> {
@@ -60,6 +86,154 @@ fn read_plan(folder_path: String, plan_name: String) -> Result<String, String> {
         .map_err(|e| format!("Failed to read plan file: {}", e))
 }
 
+fn get_session_links_path(folder_path: &str) -> PathBuf {
+    Path::new(folder_path).join(".trellico").join("session-links.json")
+}
+
+#[tauri::command]
+fn read_session_links(folder_path: String) -> Result<SessionLinksStore, String> {
+    let links_path = get_session_links_path(&folder_path);
+
+    if !links_path.exists() {
+        return Ok(SessionLinksStore::default());
+    }
+
+    let content = fs::read_to_string(&links_path)
+        .map_err(|e| format!("Failed to read session links: {}", e))?;
+
+    serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse session links: {}", e))
+}
+
+#[tauri::command]
+fn save_session_link(folder_path: String, session_id: String, plan_file_name: String) -> Result<(), String> {
+    let links_path = get_session_links_path(&folder_path);
+
+    // Load existing store or create new
+    let mut store = if links_path.exists() {
+        let content = fs::read_to_string(&links_path)
+            .map_err(|e| format!("Failed to read session links: {}", e))?;
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        SessionLinksStore { version: 1, links: vec![] }
+    };
+
+    let now = Utc::now().to_rfc3339();
+
+    // Check if link already exists
+    if let Some(existing) = store.links.iter_mut().find(|l| l.plan_file_name == plan_file_name) {
+        existing.session_id = session_id;
+        existing.updated_at = now;
+    } else {
+        store.links.push(SessionPlanLink {
+            session_id,
+            plan_file_name,
+            created_at: now.clone(),
+            updated_at: now,
+        });
+    }
+
+    // Write back
+    let content = serde_json::to_string_pretty(&store)
+        .map_err(|e| format!("Failed to serialize session links: {}", e))?;
+
+    fs::write(&links_path, content)
+        .map_err(|e| format!("Failed to write session links: {}", e))
+}
+
+#[tauri::command]
+fn get_link_by_plan(folder_path: String, plan_file_name: String) -> Result<Option<SessionPlanLink>, String> {
+    let store = read_session_links(folder_path)?;
+    Ok(store.links.into_iter().find(|l| l.plan_file_name == plan_file_name))
+}
+
+#[tauri::command]
+fn update_plan_link_filename(folder_path: String, old_name: String, new_name: String) -> Result<(), String> {
+    let links_path = get_session_links_path(&folder_path);
+
+    if !links_path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&links_path)
+        .map_err(|e| format!("Failed to read session links: {}", e))?;
+
+    let mut store: SessionLinksStore = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse session links: {}", e))?;
+
+    let now = Utc::now().to_rfc3339();
+
+    if let Some(link) = store.links.iter_mut().find(|l| l.plan_file_name == old_name) {
+        link.plan_file_name = new_name;
+        link.updated_at = now;
+
+        let content = serde_json::to_string_pretty(&store)
+            .map_err(|e| format!("Failed to serialize session links: {}", e))?;
+
+        fs::write(&links_path, content)
+            .map_err(|e| format!("Failed to write session links: {}", e))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn load_session_history(folder_path: String, session_id: String) -> Result<Vec<serde_json::Value>, String> {
+    // Convert folder path to Claude project dir name (replace / with -)
+    let project_dir_name = folder_path.replace("/", "-");
+
+    // Build path: ~/.claude/projects/<project_dir_name>/<session_id>.jsonl
+    let home = dirs::home_dir().ok_or("Cannot find home directory")?;
+    let session_file = home
+        .join(".claude")
+        .join("projects")
+        .join(&project_dir_name)
+        .join(format!("{}.jsonl", session_id));
+
+    if !session_file.exists() {
+        return Ok(vec![]);
+    }
+
+    let file = fs::File::open(&session_file)
+        .map_err(|e| format!("Failed to open session file: {}", e))?;
+
+    let reader = BufReader::new(file);
+    let messages: Vec<serde_json::Value> = reader
+        .lines()
+        .filter_map(|line| line.ok())
+        .filter_map(|line| serde_json::from_str(&line).ok())
+        .filter(|msg: &serde_json::Value| {
+            matches!(
+                msg.get("type").and_then(|t| t.as_str()),
+                Some("user") | Some("assistant")
+            )
+        })
+        .collect();
+
+    Ok(messages)
+}
+
+// Track known plans for detecting new files
+static KNOWN_PLANS: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn get_plan_files(plans_path: &Path) -> HashSet<String> {
+    fs::read_dir(plans_path)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter_map(|e| {
+                    let p = e.path();
+                    if p.is_file() && p.extension().map_or(false, |ext| ext == "md") {
+                        p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 fn watch_plans(app: AppHandle, folder_path: String) -> Result<(), String> {
     let plans_path = PathBuf::from(&folder_path).join(".trellico").join("plans");
@@ -70,14 +244,77 @@ fn watch_plans(app: AppHandle, folder_path: String) -> Result<(), String> {
             .map_err(|e| format!("Failed to create plans directory: {}", e))?;
     }
 
+    // Initialize known plans
+    if let Ok(mut known) = KNOWN_PLANS.lock() {
+        *known = get_plan_files(&plans_path);
+    }
+
     let app_clone = app.clone();
+    let plans_path_clone = plans_path.clone();
     let watcher = RecommendedWatcher::new(
         move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res {
+                // Always emit plans-changed for any file system event in the plans directory
                 match event.kind {
-                    notify::EventKind::Create(_)
-                    | notify::EventKind::Modify(_)
-                    | notify::EventKind::Remove(_) => {
+                    EventKind::Create(_)
+                    | EventKind::Modify(_)
+                    | EventKind::Remove(_) => {
+                        // Scan current files and compare with known to detect what changed
+                        let current_files = get_plan_files(&plans_path_clone);
+
+                        if let Ok(mut known) = KNOWN_PLANS.lock() {
+                            // Find new files (in current but not in known)
+                            let added: Vec<_> = current_files.difference(&known).cloned().collect();
+                            // Find removed files (in known but not in current)
+                            let removed: Vec<_> = known.difference(&current_files).cloned().collect();
+
+                            // If exactly one added and one removed, it's likely a rename
+                            if added.len() == 1 && removed.len() == 1 {
+                                let _ = app_clone.emit("plan-change", PlanChangeEvent {
+                                    change_type: "renamed".to_string(),
+                                    file_name: added[0].clone(),
+                                    old_file_name: Some(removed[0].clone()),
+                                });
+                            } else {
+                                // Emit individual events
+                                for file in &added {
+                                    let _ = app_clone.emit("plan-change", PlanChangeEvent {
+                                        change_type: "created".to_string(),
+                                        file_name: file.clone(),
+                                        old_file_name: None,
+                                    });
+                                }
+                                for file in &removed {
+                                    let _ = app_clone.emit("plan-change", PlanChangeEvent {
+                                        change_type: "removed".to_string(),
+                                        file_name: file.clone(),
+                                        old_file_name: None,
+                                    });
+                                }
+                            }
+
+                            // For modifications, check if the event path is an existing .md file
+                            if let EventKind::Modify(_) = event.kind {
+                                if let Some(path) = event.paths.first() {
+                                    if path.extension().map_or(false, |ext| ext == "md") {
+                                        if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                                            if current_files.contains(name) && known.contains(name) {
+                                                let _ = app_clone.emit("plan-change", PlanChangeEvent {
+                                                    change_type: "modified".to_string(),
+                                                    file_name: name.to_string(),
+                                                    old_file_name: None,
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Update known plans
+                            *known = current_files;
+                        }
+
+                        // Always emit plans-changed so the UI refreshes
                         let _ = app_clone.emit("plans-changed", ());
                     }
                     _ => {}
@@ -249,7 +486,19 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_decorum::init())
-        .invoke_handler(tauri::generate_handler![run_claude, stop_claude, setup_folder, list_plans, read_plan, watch_plans])
+        .invoke_handler(tauri::generate_handler![
+            run_claude,
+            stop_claude,
+            setup_folder,
+            list_plans,
+            read_plan,
+            watch_plans,
+            read_session_links,
+            save_session_link,
+            get_link_by_plan,
+            update_plan_link_filename,
+            load_session_history
+        ])
         .setup(|app| {
             let main_window = app.get_webview_window("main").unwrap();
 

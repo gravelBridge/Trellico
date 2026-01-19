@@ -109,9 +109,6 @@ How will success be measured?
 - "Reduce time to complete X by 50%"
 - "Increase conversion rate by 10%"
 
-### 9. Open Questions
-Remaining questions or areas needing clarification.
-
 ---
 
 ## Writing for Junior Developers
@@ -214,11 +211,6 @@ Add priority levels to tasks so users can focus on what matters most. Tasks can 
 - Users can change priority in under 2 clicks
 - High-priority tasks immediately visible at top of lists
 - No regression in task list performance
-
-## Open Questions
-
-- Should priority affect task ordering within a column?
-- Should we add keyboard shortcuts for priority changes?
 \`\`\`
 
 ---

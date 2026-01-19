@@ -169,3 +169,42 @@
   margin-top: 1em;
   margin-bottom: 1em;
 }
+
+/* Resize divider styles */
+.resize-divider {
+  width: 9px;
+  cursor: col-resize;
+  background: var(--border);
+  flex-shrink: 0;
+  position: relative;
+}
+.resize-divider::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  left: -3px;
+  right: -3px;
+  z-index: 10;
+}
+.resize-divider:hover {
+  background: var(--border);
+}
+.resize-divider.is-resizing {
+  background: var(--border);
+}
+.resize-handle {
+  width: 3px;
+  height: 32px;
+  border-radius: 2px;
+  background: var(--muted-foreground);
+  opacity: 0.3;
+  transition: opacity 150ms ease;
+}
+.resize-divider:hover .resize-handle {
+  opacity: 0.5;
+  background: var(--primary);
+}
+.resize-divider.is-resizing .resize-handle {
+  opacity: 0.7;
+  background: var(--primary);
+}
