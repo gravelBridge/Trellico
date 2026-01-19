@@ -5,7 +5,6 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import Markdown from "react-markdown";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 interface ClaudeMessage {
@@ -55,9 +54,8 @@ function App() {
         }
       });
 
-      const exitUnlisten = await listen<number>("claude-exit", (event) => {
+      const exitUnlisten = await listen<number>("claude-exit", () => {
         if (mounted) {
-          setMessages((prev) => [...prev, { type: "system", content: `Completed (exit ${event.payload})` }]);
           setIsRunning(false);
         }
       });
@@ -133,7 +131,7 @@ function App() {
         return (
           <div key={index} className="space-y-3">
             {textContent && (
-              <div className="prose prose-neutral prose-sm max-w-none">
+              <div className="prose prose-neutral prose-sm inline-block select-text">
                 <Markdown>{textContent}</Markdown>
               </div>
             )}
@@ -175,13 +173,15 @@ function App() {
         // Skip the text since it duplicates the assistant message, just show metadata
         if (msg.total_cost_usd === undefined) return null;
         return (
-          <p key={index} className="text-[11px] text-muted-foreground pt-4 border-t">
+          <p key={index} className="text-[11px] text-muted-foreground pt-4 border-t w-fit select-text">
             ${msg.total_cost_usd.toFixed(4)} · {((msg.duration_ms || 0) / 1000).toFixed(1)}s
           </p>
         );
       case "system":
+        // Only show errors, not exit messages
+        if (!msg.content?.startsWith("Error:")) return null;
         return (
-          <p key={index} className="text-xs text-muted-foreground">
+          <p key={index} className="text-xs text-destructive">
             {msg.content}
           </p>
         );
@@ -213,42 +213,38 @@ function App() {
         </Button>
       </header>
 
-      <div className="flex-1 flex flex-col">
-        {messages.length > 0 ? (
-          <ScrollArea className="flex-1" ref={scrollRef}>
-            <div className="max-w-2xl mx-auto px-6 py-8 space-y-6">
-              {messages.map((msg, i) => renderMessage(msg, i))}
-            </div>
-          </ScrollArea>
-        ) : (
-          <div className="flex-1" />
+      <div className="flex-1 overflow-auto select-none" ref={scrollRef}>
+        {messages.length > 0 && (
+          <div className="max-w-2xl mx-auto px-6 py-8 space-y-6">
+            {messages.map((msg, i) => renderMessage(msg, i))}
+          </div>
         )}
+      </div>
 
-        <div className={cn(
-          "border-t",
-          messages.length === 0 && "border-t-0"
-        )}>
-          <form onSubmit={handleSubmit} className="max-w-2xl mx-auto px-6 py-6">
-            <Textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Ask anything..."
-              rows={3}
-              autoFocus
-              disabled={isRunning}
-              className="resize-none text-base bg-background"
-            />
-            <div className="flex justify-end mt-4">
-              <Button
-                type="submit"
-                size="sm"
-                disabled={!message.trim() || isRunning}
-              >
-                {isRunning ? "Running..." : "Send"}
-              </Button>
-            </div>
-          </form>
-        </div>
+      <div className={cn(
+        "select-none",
+        messages.length > 0 && "border-t"
+      )}>
+        <form onSubmit={handleSubmit} className="max-w-2xl mx-auto px-6 py-6">
+          <Textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="Ask anything..."
+            rows={3}
+            autoFocus
+            disabled={isRunning}
+            className="resize-none text-base bg-background"
+          />
+          <div className="flex justify-end mt-4">
+            <Button
+              type="submit"
+              size="sm"
+              disabled={!message.trim() || isRunning}
+            >
+              {isRunning ? "Running..." : "Send"}
+            </Button>
+          </div>
+        </form>
       </div>
     </main>
   );
