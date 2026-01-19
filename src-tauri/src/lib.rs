@@ -97,6 +97,30 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![run_claude])
+        .setup(|app| {
+            #[cfg(target_os = "macos")]
+            #[allow(deprecated)]
+            {
+                use cocoa::appkit::{NSColor, NSWindow};
+                use cocoa::base::{id, nil};
+                use tauri::Manager;
+
+                let window = app.get_webview_window("main").unwrap();
+                let ns_window = window.ns_window().unwrap() as id;
+                unsafe {
+                    // Match the app background color: oklch(0.985 0.002 90) ≈ rgb(250, 249, 247)
+                    let bg_color = NSColor::colorWithRed_green_blue_alpha_(
+                        nil,
+                        250.0 / 255.0,
+                        249.0 / 255.0,
+                        247.0 / 255.0,
+                        1.0,
+                    );
+                    ns_window.setBackgroundColor_(bg_color);
+                }
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

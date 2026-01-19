@@ -3,6 +3,31 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import Markdown from "react-markdown";
+import { Light as SyntaxHighlighter } from "react-syntax-highlighter";
+import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs";
+import typescript from "react-syntax-highlighter/dist/esm/languages/hljs/typescript";
+import javascript from "react-syntax-highlighter/dist/esm/languages/hljs/javascript";
+import python from "react-syntax-highlighter/dist/esm/languages/hljs/python";
+import bash from "react-syntax-highlighter/dist/esm/languages/hljs/bash";
+import json from "react-syntax-highlighter/dist/esm/languages/hljs/json";
+import css from "react-syntax-highlighter/dist/esm/languages/hljs/css";
+import rust from "react-syntax-highlighter/dist/esm/languages/hljs/rust";
+
+SyntaxHighlighter.registerLanguage("typescript", typescript);
+SyntaxHighlighter.registerLanguage("ts", typescript);
+SyntaxHighlighter.registerLanguage("tsx", typescript);
+SyntaxHighlighter.registerLanguage("javascript", javascript);
+SyntaxHighlighter.registerLanguage("js", javascript);
+SyntaxHighlighter.registerLanguage("jsx", javascript);
+SyntaxHighlighter.registerLanguage("python", python);
+SyntaxHighlighter.registerLanguage("py", python);
+SyntaxHighlighter.registerLanguage("bash", bash);
+SyntaxHighlighter.registerLanguage("sh", bash);
+SyntaxHighlighter.registerLanguage("shell", bash);
+SyntaxHighlighter.registerLanguage("json", json);
+SyntaxHighlighter.registerLanguage("css", css);
+SyntaxHighlighter.registerLanguage("rust", rust);
+SyntaxHighlighter.registerLanguage("rs", rust);
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -168,8 +193,32 @@ function App() {
         return (
           <div key={index} className="space-y-1">
             {textContent && (
-              <div className="prose prose-neutral prose-sm inline-block select-text">
-                <Markdown>{textContent}</Markdown>
+              <div className="prose prose-neutral prose-sm prose-pre:p-0 [&>*:last-child]:!mb-0 prose-p:inline prose-li:inline max-w-none select-text">
+                <Markdown
+                  components={{
+                    code({ className, children, ...props }) {
+                      const match = /language-(\w+)/.exec(className || "");
+                      const inline = !match;
+                      return !inline ? (
+                        <SyntaxHighlighter
+                          style={atomOneDark}
+                          language={match[1]}
+                          PreTag="div"
+                          customStyle={{ margin: 0, borderRadius: "0.375rem", fontSize: "0.8125rem" }}
+                          wrapLongLines={true}
+                        >
+                          {String(children).replace(/\n$/, "")}
+                        </SyntaxHighlighter>
+                      ) : (
+                        <code className={className} {...props}>
+                          {children}
+                        </code>
+                      );
+                    },
+                  }}
+                >
+                  {textContent}
+                </Markdown>
               </div>
             )}
             {toolUses?.map((tool, i) => (
@@ -206,14 +255,24 @@ function App() {
           </details>
         );
       }
-      case "result":
+      case "result": {
         // Skip the text since it duplicates the assistant message, just show metadata
         if (msg.total_cost_usd === undefined) return null;
+
+        // Check if previous content ended with a code block
+        const prevAssistant = [...messages].reverse().find(m => m.type === "assistant" && m.message?.content);
+        const prevText = prevAssistant?.message?.content?.filter(c => c.type === "text").map(c => c.text).join("") || "";
+        const endsWithCodeBlock = /```[^`]*$/.test(prevText.trim());
+
         return (
-          <p key={index} className="text-[11px] text-muted-foreground pt-2 -mt-4 border-t w-fit select-text">
+          <p key={index} className={cn(
+            "text-[11px] text-muted-foreground pt-2 border-t w-fit select-text",
+            endsWithCodeBlock ? "!-mt-2" : "!-mt-4"
+          )}>
             ${msg.total_cost_usd.toFixed(4)} · {((msg.duration_ms || 0) / 1000).toFixed(1)}s
           </p>
         );
+      }
       case "system":
         // Only show errors, not exit messages
         if (!msg.content?.startsWith("Error:")) return null;
@@ -242,7 +301,7 @@ function App() {
   }
 
   const promptForm = (
-    <form onSubmit={handleSubmit} className="max-w-2xl w-full mx-auto px-6 py-6">
+    <form onSubmit={handleSubmit} className="max-w-3xl w-full mx-auto px-6 py-6">
       <div className="relative">
         <Textarea
           value={message}
@@ -290,7 +349,7 @@ function App() {
 
       {messages.length === 0 ? (
         <div className="flex-1 flex items-center justify-center pb-32 select-none">
-          <form onSubmit={handleSubmit} className="max-w-2xl w-full mx-auto px-6">
+          <form onSubmit={handleSubmit} className="max-w-3xl w-full mx-auto px-6">
             <div className="relative">
               <Textarea
                 value={message}
@@ -329,7 +388,7 @@ function App() {
       ) : (
         <>
           <div className={`flex-1 overflow-auto select-none scroll-container ${showScrollbar ? "is-scrolling" : ""}`} ref={scrollRef} onScroll={handleScroll}>
-            <div className="max-w-2xl mx-auto px-6 pt-8 pb-4 space-y-6">
+            <div className="max-w-3xl mx-auto px-6 pt-8 pb-4 space-y-6 overflow-hidden">
               {messages.map((msg, i) => renderMessage(msg, i))}
             </div>
           </div>
