@@ -1,14 +1,102 @@
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use std::io::Read;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{AppHandle, Emitter};
+
+static PROCESS_RUNNING: AtomicBool = AtomicBool::new(false);
+
 #[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+async fn run_claude(app: AppHandle, message: String, folder_path: String) -> Result<(), String> {
+    if PROCESS_RUNNING.swap(true, Ordering::SeqCst) {
+        return Err("A process is already running".to_string());
+    }
+
+    let app_clone = app.clone();
+
+    std::thread::spawn(move || {
+        let result = run_claude_process(&app_clone, &message, &folder_path);
+        PROCESS_RUNNING.store(false, Ordering::SeqCst);
+
+        match result {
+            Ok(code) => {
+                let _ = app_clone.emit("claude-exit", code);
+            }
+            Err(e) => {
+                let _ = app_clone.emit("claude-error", e);
+            }
+        }
+    });
+
+    Ok(())
+}
+
+fn run_claude_process(app: &AppHandle, message: &str, folder_path: &str) -> Result<i32, String> {
+    let pty_system = native_pty_system();
+
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("Failed to open pty: {}", e))?;
+
+    let mut cmd = CommandBuilder::new("claude");
+    cmd.args(["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", message]);
+    cmd.cwd(folder_path);
+
+    let mut child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| format!("Failed to spawn claude: {}", e))?;
+
+    // Drop slave so EOF is sent when master closes
+    drop(pair.slave);
+
+    // Get reader from master
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("Failed to clone reader: {}", e))?;
+
+    // Stream output in real-time
+    let mut buf = [0u8; 256];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => break, // EOF
+            Ok(n) => {
+                if let Ok(text) = std::str::from_utf8(&buf[..n]) {
+                    let _ = app.emit("claude-output", text);
+                }
+            }
+            Err(e) => {
+                // EIO is expected when process exits
+                if e.kind() != std::io::ErrorKind::Other {
+                    let _ = app.emit("claude-error", format!("Read error: {}", e));
+                }
+                break;
+            }
+        }
+    }
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("Failed to wait for process: {}", e))?;
+
+    Ok(status
+        .exit_code()
+        .try_into()
+        .unwrap_or(-1))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet])
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .invoke_handler(tauri::generate_handler![run_claude])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

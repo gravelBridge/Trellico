@@ -1,49 +1,255 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
+import { useState, useEffect, useRef } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import Markdown from "react-markdown";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
+
+interface ClaudeMessage {
+  type: string;
+  subtype?: string;
+  message?: {
+    content?: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }>;
+  };
+  tool_name?: string;
+  tool_input?: Record<string, unknown>;
+  content?: string;
+  result?: string;
+  total_cost_usd?: number;
+  duration_ms?: number;
+  session_id?: string;
+}
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const [folderPath, setFolderPath] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const [isRunning, setIsRunning] = useState(false);
+  const [messages, setMessages] = useState<ClaudeMessage[]>([]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const bufferRef = useRef("");
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+  useEffect(() => {
+    let unlisteners: UnlistenFn[] = [];
+    let mounted = true;
+
+    const setupListeners = async () => {
+      const outputUnlisten = await listen<string>("claude-output", (event) => {
+        if (!mounted) return;
+
+        bufferRef.current += event.payload;
+        const lines = bufferRef.current.split("\n");
+        bufferRef.current = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const parsed = JSON.parse(trimmed) as ClaudeMessage;
+            setMessages((prev) => [...prev, parsed]);
+          } catch {
+            // Not valid JSON, ignore
+          }
+        }
+      });
+
+      const exitUnlisten = await listen<number>("claude-exit", (event) => {
+        if (mounted) {
+          setMessages((prev) => [...prev, { type: "system", content: `Completed (exit ${event.payload})` }]);
+          setIsRunning(false);
+        }
+      });
+
+      const errorUnlisten = await listen<string>("claude-error", (event) => {
+        if (mounted) {
+          setMessages((prev) => [...prev, { type: "system", content: `Error: ${event.payload}` }]);
+          setIsRunning(false);
+        }
+      });
+
+      unlisteners = [outputUnlisten, exitUnlisten, errorUnlisten];
+    };
+
+    setupListeners();
+
+    return () => {
+      mounted = false;
+      unlisteners.forEach((unlisten) => unlisten());
+    };
+  }, []);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  async function selectFolder() {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+    });
+
+    if (selected) {
+      setFolderPath(selected);
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (message.trim() && folderPath && !isRunning) {
+      setMessages([]);
+      bufferRef.current = "";
+      setIsRunning(true);
+      try {
+        await invoke("run_claude", { message, folderPath });
+      } catch (err) {
+        setMessages([{ type: "system", content: `Error: ${err}` }]);
+        setIsRunning(false);
+      }
+      setMessage("");
+    }
+  }
+
+  function renderMessage(msg: ClaudeMessage, index: number) {
+    if (msg.type === "system" && msg.subtype === "init") {
+      return null;
+    }
+
+    switch (msg.type) {
+      case "assistant": {
+        const textContent = msg.message?.content
+          ?.filter((c) => c.type === "text")
+          .map((c) => c.text)
+          .join("\n");
+        const toolUses = msg.message?.content?.filter((c) => c.type === "tool_use");
+
+        if (!textContent && (!toolUses || toolUses.length === 0)) {
+          return null;
+        }
+
+        return (
+          <div key={index} className="space-y-3">
+            {textContent && (
+              <div className="prose prose-neutral prose-sm max-w-none">
+                <Markdown>{textContent}</Markdown>
+              </div>
+            )}
+            {toolUses?.map((tool, i) => (
+              <div key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
+                <span className="font-mono text-primary font-medium">{tool.name}</span>
+                {tool.input && (
+                  <code className="text-[10px] text-muted-foreground/70">
+                    {JSON.stringify(tool.input)}
+                  </code>
+                )}
+              </div>
+            ))}
+          </div>
+        );
+      }
+      case "user": {
+        const content = msg.message?.content?.map((c) => c.text).join("\n") || msg.content;
+        if (!content?.trim()) {
+          return null;
+        }
+        return null; // Don't show user messages, they typed it
+      }
+      case "tool_result": {
+        const output = msg.content || msg.result || "";
+        if (!output.trim()) return null;
+        return (
+          <details key={index} className="group">
+            <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+              Output
+            </summary>
+            <pre className="mt-2 text-[11px] text-muted-foreground bg-muted/30 p-3 rounded-md overflow-auto max-h-48">
+              {output}
+            </pre>
+          </details>
+        );
+      }
+      case "result":
+        // Skip the text since it duplicates the assistant message, just show metadata
+        if (msg.total_cost_usd === undefined) return null;
+        return (
+          <p key={index} className="text-[11px] text-muted-foreground pt-4 border-t">
+            ${msg.total_cost_usd.toFixed(4)} · {((msg.duration_ms || 0) / 1000).toFixed(1)}s
+          </p>
+        );
+      case "system":
+        return (
+          <p key={index} className="text-xs text-muted-foreground">
+            {msg.content}
+          </p>
+        );
+      default:
+        return null;
+    }
+  }
+
+  if (!folderPath) {
+    return (
+      <main className="min-h-screen flex flex-col items-center justify-center gap-6 p-8">
+        <div className="text-center space-y-2">
+          <h1 className="text-2xl font-medium tracking-tight">Trellico</h1>
+          <p className="text-sm text-muted-foreground">Select a folder to get started</p>
+        </div>
+        <Button onClick={selectFolder} variant="outline">
+          Choose Folder
+        </Button>
+      </main>
+    );
   }
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+    <main className="min-h-screen flex flex-col">
+      <header className="flex items-center justify-between px-6 py-4 border-b">
+        <span className="text-sm font-medium">{folderPath.split("/").pop()}</span>
+        <Button variant="ghost" size="sm" onClick={selectFolder} disabled={isRunning}>
+          Change
+        </Button>
+      </header>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+      <div className="flex-1 flex flex-col">
+        {messages.length > 0 ? (
+          <ScrollArea className="flex-1" ref={scrollRef}>
+            <div className="max-w-2xl mx-auto px-6 py-8 space-y-6">
+              {messages.map((msg, i) => renderMessage(msg, i))}
+            </div>
+          </ScrollArea>
+        ) : (
+          <div className="flex-1" />
+        )}
+
+        <div className={cn(
+          "border-t",
+          messages.length === 0 && "border-t-0"
+        )}>
+          <form onSubmit={handleSubmit} className="max-w-2xl mx-auto px-6 py-6">
+            <Textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Ask anything..."
+              rows={3}
+              autoFocus
+              disabled={isRunning}
+              className="resize-none text-base bg-background"
+            />
+            <div className="flex justify-end mt-4">
+              <Button
+                type="submit"
+                size="sm"
+                disabled={!message.trim() || isRunning}
+              >
+                {isRunning ? "Running..." : "Send"}
+              </Button>
+            </div>
+          </form>
+        </div>
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
     </main>
   );
 }
