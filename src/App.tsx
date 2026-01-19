@@ -496,16 +496,50 @@ function App() {
                 </Markdown>
               </div>
             )}
-            {toolUses?.map((tool, i) => (
-              <div key={i} className="flex items-baseline gap-2 text-xs text-muted-foreground">
-                <span className="font-mono text-primary font-medium">{tool.name}</span>
-                {tool.input && (
-                  <code className="text-[10px] text-muted-foreground/70">
-                    {JSON.stringify(tool.input)}
-                  </code>
-                )}
-              </div>
-            ))}
+            {toolUses?.map((tool, i) => {
+              const inputJson = tool.input ? JSON.stringify(tool.input) : "";
+              const isLarge = inputJson.length > 200;
+
+              if (isLarge) {
+                return (
+                  <details key={i} className="group text-xs text-muted-foreground">
+                    <summary className="cursor-pointer hover:text-foreground flex items-center gap-1.5 list-none [&::-webkit-details-marker]:hidden">
+                      <svg
+                        width="10"
+                        height="10"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="shrink-0 transition-transform group-open:rotate-90"
+                      >
+                        <path d="M6 4l4 4-4 4" />
+                      </svg>
+                      <span className="font-mono text-primary font-medium">{tool.name}</span>
+                      <code className="text-[10px] text-muted-foreground/70 truncate">
+                        {inputJson}
+                      </code>
+                    </summary>
+                    <pre className="mt-2 ml-4 text-[10px] text-muted-foreground/70 bg-muted/30 p-3 rounded-md overflow-auto max-h-48 whitespace-pre-wrap break-all">
+                      {JSON.stringify(tool.input, null, 2)}
+                    </pre>
+                  </details>
+                );
+              }
+
+              return (
+                <div key={i} className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                  <span className="font-mono text-primary font-medium">{tool.name}</span>
+                  {tool.input && (
+                    <code className="text-[10px] text-muted-foreground/70">
+                      {inputJson}
+                    </code>
+                  )}
+                </div>
+              );
+            })}
           </div>
         );
       }
@@ -789,13 +823,8 @@ function App() {
             }
             rightPanel={
               <div className="flex flex-col h-full">
-                <div className="h-12 shrink-0 flex items-center justify-between gap-2 px-4 border-b" data-tauri-drag-region>
+                <div className="h-12 shrink-0 flex items-center px-4 border-b" data-tauri-drag-region>
                   <h2 className="text-sm font-medium truncate min-w-0">{kebabToTitle(selectedPlan)}</h2>
-                  <Button variant="ghost" size="sm" onClick={closePlanViewer}>
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                      <path d="M4 4l8 8M12 4l-8 8" />
-                    </svg>
-                  </Button>
                 </div>
                 <div className="flex-1 overflow-auto">
                   <div className="px-4 py-4 prose prose-neutral prose-sm prose-pre:p-0 [&>*:last-child]:!mb-0 max-w-none select-text">
