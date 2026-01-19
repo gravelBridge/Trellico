@@ -173,7 +173,7 @@ function App() {
               </div>
             )}
             {toolUses?.map((tool, i) => (
-              <div key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
+              <div key={i} className="flex items-baseline gap-2 text-xs text-muted-foreground">
                 <span className="font-mono text-primary font-medium">{tool.name}</span>
                 {tool.input && (
                   <code className="text-[10px] text-muted-foreground/70">
@@ -289,13 +289,47 @@ function App() {
       </header>
 
       {messages.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center select-none">
-          {promptForm}
+        <div className="flex-1 flex items-center justify-center pb-32 select-none">
+          <form onSubmit={handleSubmit} className="max-w-2xl w-full mx-auto px-6">
+            <div className="relative">
+              <Textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    if (message.trim() && !isRunning) {
+                      handleSubmit(e);
+                    }
+                  }
+                }}
+                placeholder="Ask anything..."
+                rows={5}
+                autoFocus
+                disabled={isRunning}
+                className="resize-none text-base bg-background pr-12"
+              />
+              <button
+                type="submit"
+                disabled={!message.trim() || isRunning}
+                className={cn(
+                  "absolute bottom-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-colors",
+                  message.trim() && !isRunning
+                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                    : "bg-muted text-muted-foreground"
+                )}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M8 12V4M4 8l4-4 4 4" />
+                </svg>
+              </button>
+            </div>
+          </form>
         </div>
       ) : (
         <>
           <div className={`flex-1 overflow-auto select-none scroll-container ${showScrollbar ? "is-scrolling" : ""}`} ref={scrollRef} onScroll={handleScroll}>
-            <div className="max-w-2xl mx-auto px-6 py-8 space-y-6">
+            <div className="max-w-2xl mx-auto px-6 pt-8 pb-4 space-y-6">
               {messages.map((msg, i) => renderMessage(msg, i))}
             </div>
           </div>
