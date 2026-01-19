@@ -1,9 +1,21 @@
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use std::fs;
 use std::io::Read;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
 
 static PROCESS_RUNNING: AtomicBool = AtomicBool::new(false);
+
+#[tauri::command]
+fn setup_folder(folder_path: String) -> Result<(), String> {
+    let trellico_path = Path::new(&folder_path).join(".trellico");
+    if !trellico_path.exists() {
+        fs::create_dir(&trellico_path)
+            .map_err(|e| format!("Failed to create .trellico folder: {}", e))?;
+    }
+    Ok(())
+}
 
 #[tauri::command]
 async fn run_claude(app: AppHandle, message: String, folder_path: String) -> Result<(), String> {
@@ -96,7 +108,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![run_claude])
+        .invoke_handler(tauri::generate_handler![run_claude, setup_folder])
         .setup(|app| {
             #[cfg(target_os = "macos")]
             #[allow(deprecated)]

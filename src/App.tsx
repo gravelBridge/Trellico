@@ -152,6 +152,7 @@ function App() {
     });
 
     if (selected) {
+      await invoke("setup_folder", { folderPath: selected });
       setFolderPath(selected);
     }
   }
