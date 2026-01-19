@@ -122,7 +122,35 @@
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
+  html, body {
+    @apply bg-background text-foreground h-full overflow-hidden;
   }
+}
+
+.scroll-container {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.scroll-container.is-scrolling {
+  scrollbar-color: oklch(0.3 0 0 / 0.5) transparent;
+}
+.dark .scroll-container.is-scrolling {
+  scrollbar-color: oklch(0.7 0 0 / 0.5) transparent;
+}
+.scroll-container::-webkit-scrollbar {
+  width: 8px;
+}
+.scroll-container::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 4px;
+  transition: background-color 200ms ease-out;
+}
+.scroll-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-container.is-scrolling::-webkit-scrollbar-thumb {
+  background-color: oklch(0.3 0 0 / 0.5);
+}
+.dark .scroll-container.is-scrolling::-webkit-scrollbar-thumb {
+  background-color: oklch(0.7 0 0 / 0.5);
 }
