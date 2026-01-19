@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { prdPrompt } from "@/prompts";
 
 interface ClaudeMessage {
   type: string;
@@ -54,6 +55,7 @@ function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [messages, setMessages] = useState<ClaudeMessage[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeTab, setActiveTab] = useState("plans");
   const scrollRef = useRef<HTMLDivElement>(null);
   const bufferRef = useRef("");
   const shouldAutoScroll = useRef(true);
@@ -166,8 +168,13 @@ function App() {
       bufferRef.current = "";
       shouldAutoScroll.current = true;
       setIsRunning(true);
+
+      const fullMessage = activeTab === "plans"
+        ? `${prdPrompt}\n\n${message}`
+        : message;
+
       try {
-        await invoke("run_claude", { message, folderPath });
+        await invoke("run_claude", { message: fullMessage, folderPath });
       } catch (err) {
         setMessages([{ type: "system", content: `Error: ${err}` }]);
         setIsRunning(false);
@@ -353,22 +360,20 @@ function App() {
           sidebarOpen ? "opacity-100" : "opacity-0"
         )}>
           {/* Titlebar area with toggle button next to traffic lights */}
-          <div className="relative pt-[7px] pb-2 shrink-0">
+          <div className="h-12 relative shrink-0">
             <div className="absolute inset-0" data-tauri-drag-region />
-            <div className="flex items-center pl-[90px] pr-4 relative pointer-events-none">
-              <button
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="p-1 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground relative z-50 pointer-events-auto"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2" />
-                  <path d="M9 3v18" />
-                </svg>
-              </button>
-            </div>
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="absolute left-[85px] top-1/2 -translate-y-[calc(50%+2px)] p-1 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground z-10"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <path d="M9 3v18" />
+              </svg>
+            </button>
           </div>
           <div className="px-2">
-            <Tabs defaultValue="plans" className="w-full">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="w-full">
                 <TabsTrigger value="plans" className="flex-1">Plans</TabsTrigger>
                 <TabsTrigger value="agents" className="flex-1">Agents</TabsTrigger>
@@ -396,17 +401,15 @@ function App() {
       {!sidebarOpen && (
         <div className="absolute top-0 left-0 h-12 w-32 z-50">
           <div className="absolute inset-0" data-tauri-drag-region />
-          <div className="absolute top-[7px] left-0 flex items-center pl-[90px] pointer-events-none">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="p-1 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground relative z-10 pointer-events-auto"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <path d="M9 3v18" />
-              </svg>
-            </button>
-          </div>
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="absolute left-[85px] top-1/2 -translate-y-[calc(50%+2px)] p-1 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground z-10"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M9 3v18" />
+            </svg>
+          </button>
         </div>
       )}
 
@@ -418,6 +421,9 @@ function App() {
         {messages.length === 0 ? (
           <div className="flex-1 flex items-center justify-center pb-20 select-none">
             <form onSubmit={handleSubmit} className="max-w-3xl w-full mx-auto px-6">
+              {activeTab === "plans" && (
+                <h2 className="text-2xl font-medium text-center mb-6 select-none cursor-default">Create a plan</h2>
+              )}
               <div className="relative">
                 <Textarea
                   value={message}
@@ -430,7 +436,7 @@ function App() {
                       }
                     }
                   }}
-                  placeholder="Ask anything..."
+                  placeholder={activeTab === "plans" ? "What do you want to do?" : "Ask anything..."}
                   rows={5}
                   autoFocus
                   disabled={isRunning}

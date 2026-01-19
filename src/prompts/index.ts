@@ -1,0 +1,1 @@
+export { prdPrompt } from "./prd";

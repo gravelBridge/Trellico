@@ -154,3 +154,12 @@
 .dark .scroll-container.is-scrolling::-webkit-scrollbar-thumb {
   background-color: oklch(0.7 0 0 / 0.5);
 }
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

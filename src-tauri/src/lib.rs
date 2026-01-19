@@ -3,7 +3,8 @@ use std::fs;
 use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_decorum::WebviewWindowExt;
 
 static PROCESS_RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -108,17 +109,24 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_decorum::init())
         .invoke_handler(tauri::generate_handler![run_claude, setup_folder])
         .setup(|app| {
+            let main_window = app.get_webview_window("main").unwrap();
+
+            #[cfg(target_os = "macos")]
+            {
+                // Set traffic light position
+                main_window.set_traffic_lights_inset(16.0, 20.0).unwrap();
+            }
+
             #[cfg(target_os = "macos")]
             #[allow(deprecated)]
             {
                 use cocoa::appkit::{NSColor, NSWindow};
                 use cocoa::base::{id, nil};
-                use tauri::Manager;
 
-                let window = app.get_webview_window("main").unwrap();
-                let ns_window = window.ns_window().unwrap() as id;
+                let ns_window = main_window.ns_window().unwrap() as id;
                 unsafe {
                     // Match the app background color: oklch(0.985 0.002 90) ≈ rgb(250, 249, 247)
                     let bg_color = NSColor::colorWithRed_green_blue_alpha_(
