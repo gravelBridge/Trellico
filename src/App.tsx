@@ -30,6 +30,7 @@ SyntaxHighlighter.registerLanguage("rust", rust);
 SyntaxHighlighter.registerLanguage("rs", rust);
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 interface ClaudeMessage {
@@ -52,6 +53,7 @@ function App() {
   const [message, setMessage] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [messages, setMessages] = useState<ClaudeMessage[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bufferRef = useRef("");
   const shouldAutoScroll = useRef(true);
@@ -340,65 +342,131 @@ function App() {
   );
 
   return (
-    <main className="h-screen flex flex-col overflow-hidden">
-      <header className="flex items-center justify-between px-6 pt-2 pb-4 border-b">
-        <span className="text-sm font-medium">{folderPath.split("/").pop()}</span>
-        <Button variant="ghost" size="sm" onClick={selectFolder} disabled={isRunning}>
-          Change
-        </Button>
-      </header>
-
-      {messages.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center pb-32 select-none">
-          <form onSubmit={handleSubmit} className="max-w-3xl w-full mx-auto px-6">
-            <div className="relative">
-              <Textarea
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    if (message.trim() && !isRunning) {
-                      handleSubmit(e);
-                    }
-                  }
-                }}
-                placeholder="Ask anything..."
-                rows={5}
-                autoFocus
-                disabled={isRunning}
-                className="resize-none text-base bg-background pr-12"
-              />
+    <main className="h-screen flex overflow-hidden">
+      {/* Sidebar */}
+      <aside className={cn(
+        "border-r flex flex-col bg-muted/30 transition-all duration-200 relative z-10",
+        sidebarOpen ? "w-64" : "w-0 border-r-0"
+      )}>
+        <div className={cn(
+          "flex flex-col h-full overflow-hidden w-64",
+          sidebarOpen ? "opacity-100" : "opacity-0"
+        )}>
+          {/* Titlebar area with toggle button next to traffic lights */}
+          <div className="relative pt-[7px] pb-2 shrink-0">
+            <div className="absolute inset-0" data-tauri-drag-region />
+            <div className="flex items-center pl-[90px] pr-4 relative pointer-events-none">
               <button
-                type="submit"
-                disabled={!message.trim() || isRunning}
-                className={cn(
-                  "absolute bottom-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-colors",
-                  message.trim() && !isRunning
-                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                    : "bg-muted text-muted-foreground"
-                )}
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="p-1 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground relative z-50 pointer-events-auto"
               >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M8 12V4M4 8l4-4 4 4" />
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <path d="M9 3v18" />
                 </svg>
               </button>
             </div>
-          </form>
-        </div>
-      ) : (
-        <>
-          <div className={`flex-1 overflow-auto select-none scroll-container ${showScrollbar ? "is-scrolling" : ""}`} ref={scrollRef} onScroll={handleScroll}>
-            <div className="max-w-3xl mx-auto px-6 pt-8 pb-4 space-y-6 overflow-hidden">
-              {messages.map((msg, i) => renderMessage(msg, i))}
+          </div>
+          <div className="px-2">
+            <Tabs defaultValue="plans" className="w-full">
+              <TabsList className="w-full">
+                <TabsTrigger value="plans" className="flex-1">Plans</TabsTrigger>
+                <TabsTrigger value="agents" className="flex-1">Agents</TabsTrigger>
+              </TabsList>
+              <TabsContent value="plans" className="mt-4">
+                <p className="text-sm text-muted-foreground px-1">No plans yet</p>
+              </TabsContent>
+              <TabsContent value="agents" className="mt-4">
+                <p className="text-sm text-muted-foreground px-1">No agents yet</p>
+              </TabsContent>
+            </Tabs>
+          </div>
+          <div className="mt-auto px-4 py-2 border-t">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium truncate">{folderPath.split("/").pop()}</span>
+              <Button variant="ghost" size="sm" onClick={selectFolder} disabled={isRunning}>
+                Change
+              </Button>
             </div>
           </div>
+        </div>
+      </aside>
 
-          <div className="select-none border-t">
-            {promptForm}
+      {/* Toggle button and drag region when sidebar is closed */}
+      {!sidebarOpen && (
+        <div className="absolute top-0 left-0 h-12 w-32 z-50">
+          <div className="absolute inset-0" data-tauri-drag-region />
+          <div className="absolute top-[7px] left-0 flex items-center pl-[90px] pointer-events-none">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-1 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground relative z-10 pointer-events-auto"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <path d="M9 3v18" />
+              </svg>
+            </button>
           </div>
-        </>
+        </div>
       )}
+
+      {/* Main content */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Titlebar drag region */}
+        <div className="h-12 shrink-0" data-tauri-drag-region />
+
+        {messages.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center pb-20 select-none">
+            <form onSubmit={handleSubmit} className="max-w-3xl w-full mx-auto px-6">
+              <div className="relative">
+                <Textarea
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      if (message.trim() && !isRunning) {
+                        handleSubmit(e);
+                      }
+                    }
+                  }}
+                  placeholder="Ask anything..."
+                  rows={5}
+                  autoFocus
+                  disabled={isRunning}
+                  className="resize-none text-base bg-background pr-12"
+                />
+                <button
+                  type="submit"
+                  disabled={!message.trim() || isRunning}
+                  className={cn(
+                    "absolute bottom-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-colors",
+                    message.trim() && !isRunning
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8 12V4M4 8l4-4 4 4" />
+                  </svg>
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : (
+          <>
+            <div className={`flex-1 overflow-auto select-none scroll-container ${showScrollbar ? "is-scrolling" : ""}`} ref={scrollRef} onScroll={handleScroll}>
+              <div className="max-w-3xl mx-auto px-6 pt-8 pb-4 space-y-6 overflow-hidden">
+                {messages.map((msg, i) => renderMessage(msg, i))}
+              </div>
+            </div>
+
+            <div className="select-none border-t">
+              {promptForm}
+            </div>
+          </>
+        )}
+      </div>
     </main>
   );
 }
