@@ -49,6 +49,13 @@ interface ClaudeMessage {
   session_id?: string;
 }
 
+function kebabToTitle(kebab: string): string {
+  return kebab
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function App() {
   const [folderPath, setFolderPath] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -62,6 +69,10 @@ function App() {
   const shouldAutoScroll = useRef(true);
   const [showScrollbar, setShowScrollbar] = useState(false);
   const scrollTimeoutRef = useRef<number | null>(null);
+  const [plans, setPlans] = useState<string[]>([]);
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
+  const [planContent, setPlanContent] = useState<string | null>(null);
+  const selectedPlanRef = useRef<string | null>(null);
 
   useEffect(() => {
     let unlisteners: UnlistenFn[] = [];
@@ -124,6 +135,78 @@ function App() {
       });
     }
   }, [messages]);
+
+  useEffect(() => {
+    selectedPlanRef.current = selectedPlan;
+  }, [selectedPlan]);
+
+  useEffect(() => {
+    if (!folderPath) return;
+
+    loadPlans();
+
+    // Start watching for file changes
+    invoke("watch_plans", { folderPath }).catch((err) => {
+      console.error("Failed to start watching plans:", err);
+    });
+
+    // Listen for plan changes
+    let unlisten: UnlistenFn | null = null;
+    listen("plans-changed", () => {
+      loadPlans();
+      // If a plan is selected, reload its content
+      if (selectedPlanRef.current) {
+        reloadSelectedPlan();
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [folderPath]);
+
+  async function loadPlans() {
+    if (!folderPath) return;
+    try {
+      const planList = await invoke<string[]>("list_plans", { folderPath });
+      setPlans(planList);
+    } catch (err) {
+      console.error("Failed to load plans:", err);
+    }
+  }
+
+  async function reloadSelectedPlan() {
+    const planName = selectedPlanRef.current;
+    if (!folderPath || !planName) return;
+    try {
+      const content = await invoke<string>("read_plan", { folderPath, planName });
+      setPlanContent(content);
+    } catch (err) {
+      // Plan might have been deleted
+      console.error("Failed to reload plan:", err);
+      setSelectedPlan(null);
+      setPlanContent(null);
+    }
+  }
+
+  async function selectPlan(planName: string) {
+    if (!folderPath) return;
+    setSelectedPlan(planName);
+    try {
+      const content = await invoke<string>("read_plan", { folderPath, planName });
+      setPlanContent(content);
+    } catch (err) {
+      console.error("Failed to read plan:", err);
+      setPlanContent(null);
+    }
+  }
+
+  function closePlanViewer() {
+    setSelectedPlan(null);
+    setPlanContent(null);
+  }
 
   function handleScroll() {
     if (!scrollRef.current) return;
@@ -201,6 +284,8 @@ function App() {
     setMessages([]);
     setSessionId(null);
     setMessage("");
+    setSelectedPlan(null);
+    setPlanContent(null);
   }
 
   async function stopClaude() {
@@ -416,7 +501,26 @@ function App() {
                   </svg>
                   New plan
                 </Button>
-                <p className="text-sm text-muted-foreground px-1 mt-2">No plans yet</p>
+                {plans.length > 0 ? (
+                  <div className="mt-2 space-y-0.5">
+                    {plans.map((plan) => (
+                      <button
+                        key={plan}
+                        onClick={() => selectPlan(plan)}
+                        className={cn(
+                          "w-full text-left px-2 py-1.5 text-sm rounded-md transition-colors truncate",
+                          selectedPlan === plan
+                            ? "bg-muted text-foreground"
+                            : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                        )}
+                      >
+                        {kebabToTitle(plan)}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground px-1 mt-2">No plans yet</p>
+                )}
               </TabsContent>
               <TabsContent value="agents" className="mt-4">
                 <p className="text-sm text-muted-foreground px-1">No agents yet</p>
@@ -452,10 +556,49 @@ function App() {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Titlebar drag region */}
-        <div className="h-12 shrink-0" data-tauri-drag-region />
-
-        {messages.length === 0 ? (
+        {selectedPlan && planContent ? (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="h-12 shrink-0 flex items-center justify-between px-6 border-b" data-tauri-drag-region>
+              <h2 className="text-lg font-medium">{kebabToTitle(selectedPlan)}</h2>
+              <Button variant="ghost" size="sm" onClick={closePlanViewer}>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M4 4l8 8M12 4l-8 8" />
+                </svg>
+              </Button>
+            </div>
+            <div className="flex-1 overflow-auto">
+              <div className="max-w-3xl mx-auto px-6 py-6 prose prose-neutral prose-sm prose-pre:p-0 [&>*:last-child]:!mb-0 max-w-none select-text">
+                <Markdown
+                  components={{
+                    code({ className, children, ...props }) {
+                      const match = /language-(\w+)/.exec(className || "");
+                      const inline = !match;
+                      return !inline ? (
+                        <SyntaxHighlighter
+                          style={atomOneDark}
+                          language={match[1]}
+                          PreTag="div"
+                          customStyle={{ margin: 0, borderRadius: "0.375rem", fontSize: "0.8125rem" }}
+                          wrapLongLines={true}
+                        >
+                          {String(children).replace(/\n$/, "")}
+                        </SyntaxHighlighter>
+                      ) : (
+                        <code className={className} {...props}>
+                          {children}
+                        </code>
+                      );
+                    },
+                  }}
+                >
+                  {planContent}
+                </Markdown>
+              </div>
+            </div>
+          </div>
+        ) : messages.length === 0 ? (
+          <>
+          <div className="h-12 shrink-0" data-tauri-drag-region />
           <div className="flex-1 flex items-center justify-center pb-20 select-none">
             <form onSubmit={handleSubmit} className="max-w-3xl w-full mx-auto px-6">
               {activeTab === "plans" && (
@@ -504,8 +647,10 @@ function App() {
               </div>
             </form>
           </div>
+          </>
         ) : (
           <>
+            <div className="h-12 shrink-0" data-tauri-drag-region />
             <div className={`flex-1 overflow-auto select-none scroll-container ${showScrollbar ? "is-scrolling" : ""}`} ref={scrollRef} onScroll={handleScroll}>
               <div className="max-w-3xl mx-auto px-6 pt-0 pb-4 space-y-3 overflow-hidden">
                 {messages.map((msg, i) => renderMessage(msg, i))}

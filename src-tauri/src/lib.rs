@@ -1,7 +1,8 @@
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::fs;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
@@ -10,6 +11,7 @@ use tauri_plugin_decorum::WebviewWindowExt;
 static PROCESS_RUNNING: AtomicBool = AtomicBool::new(false);
 static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static MASTER_PTY: Mutex<Option<Box<dyn MasterPty + Send>>> = Mutex::new(None);
+static PLANS_WATCHER: Mutex<Option<RecommendedWatcher>> = Mutex::new(None);
 
 #[tauri::command]
 fn setup_folder(folder_path: String) -> Result<(), String> {
@@ -18,6 +20,87 @@ fn setup_folder(folder_path: String) -> Result<(), String> {
         fs::create_dir(&trellico_path)
             .map_err(|e| format!("Failed to create .trellico folder: {}", e))?;
     }
+    Ok(())
+}
+
+#[tauri::command]
+fn list_plans(folder_path: String) -> Result<Vec<String>, String> {
+    let plans_path = Path::new(&folder_path).join(".trellico").join("plans");
+    if !plans_path.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut plans = Vec::new();
+    let entries = fs::read_dir(&plans_path)
+        .map_err(|e| format!("Failed to read plans directory: {}", e))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() && path.extension().map_or(false, |ext| ext == "md") {
+            if let Some(stem) = path.file_stem() {
+                if let Some(name) = stem.to_str() {
+                    plans.push(name.to_string());
+                }
+            }
+        }
+    }
+
+    plans.sort();
+    Ok(plans)
+}
+
+#[tauri::command]
+fn read_plan(folder_path: String, plan_name: String) -> Result<String, String> {
+    let plan_path = Path::new(&folder_path)
+        .join(".trellico")
+        .join("plans")
+        .join(format!("{}.md", plan_name));
+
+    fs::read_to_string(&plan_path)
+        .map_err(|e| format!("Failed to read plan file: {}", e))
+}
+
+#[tauri::command]
+fn watch_plans(app: AppHandle, folder_path: String) -> Result<(), String> {
+    let plans_path = PathBuf::from(&folder_path).join(".trellico").join("plans");
+
+    // Create plans directory if it doesn't exist
+    if !plans_path.exists() {
+        fs::create_dir_all(&plans_path)
+            .map_err(|e| format!("Failed to create plans directory: {}", e))?;
+    }
+
+    let app_clone = app.clone();
+    let watcher = RecommendedWatcher::new(
+        move |res: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = res {
+                match event.kind {
+                    notify::EventKind::Create(_)
+                    | notify::EventKind::Modify(_)
+                    | notify::EventKind::Remove(_) => {
+                        let _ = app_clone.emit("plans-changed", ());
+                    }
+                    _ => {}
+                }
+            }
+        },
+        Config::default(),
+    )
+    .map_err(|e| format!("Failed to create watcher: {}", e))?;
+
+    // Store the watcher
+    if let Ok(mut guard) = PLANS_WATCHER.lock() {
+        *guard = Some(watcher);
+    }
+
+    // Start watching
+    if let Ok(mut guard) = PLANS_WATCHER.lock() {
+        if let Some(ref mut w) = *guard {
+            w.watch(&plans_path, RecursiveMode::Recursive)
+                .map_err(|e| format!("Failed to watch directory: {}", e))?;
+        }
+    }
+
     Ok(())
 }
 
@@ -166,7 +249,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_decorum::init())
-        .invoke_handler(tauri::generate_handler![run_claude, stop_claude, setup_folder])
+        .invoke_handler(tauri::generate_handler![run_claude, stop_claude, setup_folder, list_plans, read_plan, watch_plans])
         .setup(|app| {
             let main_window = app.get_webview_window("main").unwrap();
 
