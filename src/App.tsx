@@ -687,7 +687,7 @@ function App() {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="w-full">
                 <TabsTrigger value="plans" className="flex-1">Plans</TabsTrigger>
-                <TabsTrigger value="agents" className="flex-1">Agents</TabsTrigger>
+                <TabsTrigger value="ralph" className="flex-1">Ralph</TabsTrigger>
               </TabsList>
               <TabsContent value="plans" className="mt-0">
                 <Button
@@ -723,8 +723,8 @@ function App() {
                   <p className="text-sm text-muted-foreground px-1 mt-2">No plans yet</p>
                 )}
               </TabsContent>
-              <TabsContent value="agents" className="mt-4">
-                <p className="text-sm text-muted-foreground px-1">No agents yet</p>
+              <TabsContent value="ralph" className="mt-4">
+                <p className="text-sm text-muted-foreground px-1">No Ralph sessions yet</p>
               </TabsContent>
             </Tabs>
           </div>
