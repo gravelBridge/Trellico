@@ -1,13 +1,11 @@
 use notify::RecommendedWatcher;
-use portable_pty::MasterPty;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicBool;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
-// Claude process state
-pub static PROCESS_RUNNING: AtomicBool = AtomicBool::new(false);
-pub static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
-pub static MASTER_PTY: Mutex<Option<Box<dyn MasterPty + Send>>> = Mutex::new(None);
+// Claude processes - maps process_id to stop flag
+pub static CLAUDE_PROCESSES: LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 // File watchers
 pub static PLANS_WATCHER: Mutex<Option<RecommendedWatcher>> = Mutex::new(None);

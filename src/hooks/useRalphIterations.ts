@@ -7,7 +7,7 @@ import { useMessageStore } from "@/contexts";
 
 interface UseRalphIterationsProps {
   folderPath: string | null;
-  runClaude: (message: string, folderPath: string, sessionId: string | null) => Promise<void>;
+  runClaude: (message: string, folderPath: string, sessionId: string | null) => Promise<string>;
 }
 
 interface UseRalphIterationsReturn {
@@ -20,7 +20,7 @@ interface UseRalphIterationsReturn {
   stopRalphing: () => void;
   selectIteration: (prdName: string, iterationNumber: number) => void;
   clearIterationSelection: () => void;
-  handleClaudeExit: (messages: ClaudeMessage[]) => void;
+  handleClaudeExit: (messages: ClaudeMessage[], sessionId: string) => void;
 }
 
 function isComplete(messages: ClaudeMessage[]): boolean {
@@ -67,6 +67,7 @@ export function useRalphIterations({
   const ralphingPrdRef = useRef<string | null>(null);
   const currentIterationRef = useRef<number | null>(null);
   const folderPathRef = useRef<string | null>(null);
+  const currentProcessIdRef = useRef<string | null>(null);
   // Guard to prevent starting a new iteration while one is being processed
   const processingExitRef = useRef(false);
   // Debounce ref for file change events
@@ -156,7 +157,8 @@ export function useRalphIterations({
       const prdPath = `.trellico/ralph/${prdName}/prd.json`;
       const prompt = getRalphPrompt(prdPath);
 
-      await runClaude(prompt, folderPath, null);
+      const processId = await runClaude(prompt, folderPath, null);
+      currentProcessIdRef.current = processId;
     },
     [folderPath, runClaude]
   );
@@ -202,6 +204,7 @@ export function useRalphIterations({
     isRalphingRef.current = false;
     ralphingPrdRef.current = null;
     currentIterationRef.current = null;
+    currentProcessIdRef.current = null;
 
     setIsRalphing(false);
     setRalphingPrd(null);
@@ -252,9 +255,13 @@ export function useRalphIterations({
 
       if (isCurrentRunningIteration) {
         // Switch to viewing the live session (session_id may not be persisted yet)
-        const liveSessionId = store.getLiveSessionIdRef();
-        if (liveSessionId) {
-          store.viewSession(liveSessionId);
+        // Look up the session from the current process
+        const processId = currentProcessIdRef.current;
+        if (processId) {
+          const sessionId = store.getProcessSessionId(processId);
+          if (sessionId) {
+            store.viewSession(sessionId);
+          }
         }
       } else if (iteration.session_id) {
         // Load historical session
@@ -263,7 +270,10 @@ export function useRalphIterations({
             folderPath,
             sessionId: iteration.session_id,
           });
-          store.viewSession(iteration.session_id, history);
+          // Skip the first user message (the hidden prompt)
+          const filteredHistory =
+            history.length > 0 && history[0].type === "user" ? history.slice(1) : history;
+          store.viewSession(iteration.session_id, filteredHistory);
         } catch (err) {
           console.error("Failed to load session history:", err);
         }
@@ -278,7 +288,7 @@ export function useRalphIterations({
 
   // Handle Claude exit - this is called from useClaudeSession when claude-exit event fires
   const handleClaudeExit = useCallback(
-    async (messages: ClaudeMessage[]) => {
+    async (messages: ClaudeMessage[], sessionId: string) => {
       // Use refs for current state since this is called from an event listener
       if (!isRalphingRef.current || !ralphingPrdRef.current || !folderPathRef.current) {
         return;
@@ -294,9 +304,8 @@ export function useRalphIterations({
       const iterNum = currentIterationRef.current;
       const folder = folderPathRef.current;
 
-      // Extract session ID from the last init message
-      const initMessage = messages.find((m) => m.type === "system" && m.subtype === "init");
-      const newSessionId = initMessage?.session_id;
+      // Use the session ID passed from the callback
+      const newSessionId = sessionId;
 
       if (newSessionId && iterNum !== null) {
         // Persist the session ID to the backend
@@ -327,6 +336,7 @@ export function useRalphIterations({
         isRalphingRef.current = false;
         ralphingPrdRef.current = null;
         currentIterationRef.current = null;
+        currentProcessIdRef.current = null;
 
         try {
           await invoke("update_ralph_iteration_status", {
@@ -405,12 +415,14 @@ export function useRalphIterations({
           // Run Claude with new session (this will start a new live session in the store)
           const prdPath = `.trellico/ralph/${prdName}/prd.json`;
           const prompt = getRalphPrompt(prdPath);
-          await runClaude(prompt, folder, null);
+          const processId = await runClaude(prompt, folder, null);
+          currentProcessIdRef.current = processId;
         } catch (err) {
           console.error("Failed to start next iteration:", err);
           isRalphingRef.current = false;
           ralphingPrdRef.current = null;
           currentIterationRef.current = null;
+          currentProcessIdRef.current = null;
           setIsRalphing(false);
           setRalphingPrd(null);
           setCurrentIteration(null);

@@ -29,6 +29,7 @@ tauri-plugin-decorum = "1.1.1"
 notify = "8"
 dirs = "5"
 chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }
 
 [target."cfg(target_os = \"macos\")".dependencies]
 cocoa = "0.26"

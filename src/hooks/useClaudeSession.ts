@@ -4,14 +4,37 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import type { ClaudeMessage } from "@/types";
 import { useMessageStore } from "@/contexts";
 
+interface ClaudeOutput {
+  process_id: string;
+  data: string;
+}
+
+interface ClaudeExit {
+  process_id: string;
+  code: number;
+}
+
+interface ClaudeError {
+  process_id: string;
+  error: string;
+}
+
+interface ProcessInfo {
+  sessionId: string;
+  buffer: string;
+  onExit?: (messages: ClaudeMessage[]) => void;
+}
+
 interface UseClaudeSessionOptions {
-  onClaudeExit?: (messages: ClaudeMessage[]) => void;
+  onClaudeExit?: (messages: ClaudeMessage[], sessionId: string) => void;
 }
 
 export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
   const { onClaudeExit } = options;
   const store = useMessageStore();
-  const bufferRef = useRef("");
+
+  // Track process_id -> session info mapping
+  const processesRef = useRef<Map<string, ProcessInfo>>(new Map());
   const onClaudeExitRef = useRef(onClaudeExit);
 
   // Keep the callback ref up to date
@@ -25,43 +48,66 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
     let mounted = true;
 
     const setupListeners = async () => {
-      const outputUnlisten = await listen<string>("claude-output", (event) => {
+      const outputUnlisten = await listen<ClaudeOutput>("claude-output", (event) => {
         if (!mounted) return;
 
-        bufferRef.current += event.payload;
-        const lines = bufferRef.current.split("\n");
-        bufferRef.current = lines.pop() || "";
+        const { process_id, data } = event.payload;
+        const processInfo = processesRef.current.get(process_id);
+        if (!processInfo) return;
+
+        processInfo.buffer += data;
+        const lines = processInfo.buffer.split("\n");
+        processInfo.buffer = lines.pop() || "";
 
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) continue;
           try {
             const parsed = JSON.parse(trimmed) as ClaudeMessage;
-            // Extract session ID from init message and update the store
+            // Extract session ID from init message
             if (parsed.type === "system" && parsed.subtype === "init" && parsed.session_id) {
-              store.setLiveSessionId(parsed.session_id);
+              // Update session ID if we got it from init (for new sessions)
+              if (processInfo.sessionId !== parsed.session_id) {
+                processInfo.sessionId = parsed.session_id;
+                store.setLiveSessionId(parsed.session_id, process_id);
+              }
             }
-            store.addMessage(parsed);
+            store.addMessage(parsed, process_id);
           } catch {
             // Not valid JSON, ignore
           }
         }
       });
 
-      const exitUnlisten = await listen<number>("claude-exit", () => {
-        if (mounted) {
-          // Call the exit callback with current live messages
-          if (onClaudeExitRef.current) {
-            onClaudeExitRef.current(store.getLiveMessagesRef());
-          }
-          store.endLiveSession();
+      const exitUnlisten = await listen<ClaudeExit>("claude-exit", (event) => {
+        if (!mounted) return;
+
+        const { process_id } = event.payload;
+        const processInfo = processesRef.current.get(process_id);
+        if (!processInfo) return;
+
+        // Call the exit callback with messages for this session
+        if (processInfo.onExit) {
+          const messages = store.getSessionMessagesRef(processInfo.sessionId);
+          processInfo.onExit(messages);
+        } else if (onClaudeExitRef.current) {
+          const messages = store.getSessionMessagesRef(processInfo.sessionId);
+          onClaudeExitRef.current(messages, processInfo.sessionId);
         }
+
+        store.endProcess(process_id);
+        processesRef.current.delete(process_id);
       });
 
-      const errorUnlisten = await listen<string>("claude-error", (event) => {
-        if (mounted) {
-          store.addMessage({ type: "system", content: `Error: ${event.payload}` });
-          store.endLiveSession();
+      const errorUnlisten = await listen<ClaudeError>("claude-error", (event) => {
+        if (!mounted) return;
+
+        const { process_id, error } = event.payload;
+        const processInfo = processesRef.current.get(process_id);
+        if (processInfo) {
+          store.addMessage({ type: "system", content: `Error: ${error}` }, process_id);
+          store.endProcess(process_id);
+          processesRef.current.delete(process_id);
         }
       });
 
@@ -81,36 +127,49 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
       message: string,
       folderPath: string,
       sessionId: string | null,
-      userMessageToShow?: string
-    ) => {
-      bufferRef.current = "";
-      // If resuming an existing session, pass its ID to keep messages
-      store.startLiveSession(sessionId ?? undefined);
+      userMessageToShow?: string,
+      onExit?: (messages: ClaudeMessage[]) => void
+    ): Promise<string> => {
+      // Start the process and get process_id
+      const processId = await invoke<string>("run_claude", {
+        message,
+        folderPath,
+        sessionId,
+      });
 
-      // Add the user message to display after starting the session
+      // Track this process
+      processesRef.current.set(processId, {
+        sessionId: sessionId || "__pending__",
+        buffer: "",
+        onExit,
+      });
+
+      // Start live session in store
+      store.startProcess(processId, sessionId ?? undefined);
+
+      // Add the user message to display
       if (userMessageToShow) {
-        store.addMessage({ type: "user", content: userMessageToShow });
+        store.addMessage({ type: "user", content: userMessageToShow }, processId);
       }
 
-      try {
-        await invoke("run_claude", {
-          message,
-          folderPath,
-          sessionId,
-        });
-      } catch (err) {
-        store.addMessage({ type: "system", content: `Error: ${err}` });
-        store.endLiveSession();
-        throw err;
-      }
+      return processId;
     },
     [store]
   );
 
-  const stopClaude = useCallback(async () => {
+  const stopClaude = useCallback(async (processId?: string) => {
     try {
-      await invoke("stop_claude");
-      store.setRunning(false);
+      await invoke("stop_claude", { processId: processId || null });
+      if (processId) {
+        store.endProcess(processId);
+        processesRef.current.delete(processId);
+      } else {
+        // Stop all - clear all processes
+        for (const pid of processesRef.current.keys()) {
+          store.endProcess(pid);
+        }
+        processesRef.current.clear();
+      }
     } catch (err) {
       console.error("Failed to stop Claude:", err);
     }
@@ -119,6 +178,7 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
   return {
     runClaude,
     stopClaude,
-    isRunning: store.state.isRunning,
+    isSessionRunning: store.isSessionRunning,
+    hasAnyRunning: store.hasAnyRunning,
   };
 }

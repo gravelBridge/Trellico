@@ -11,7 +11,6 @@ interface UseRalphPrdsOptions {
 
 export function useRalphPrds({ folderPath, activeTab }: UseRalphPrdsOptions) {
   const store = useMessageStore();
-  const { getLiveSessionIdRef, getIsRunningRef } = store;
 
   const [ralphPrds, setRalphPrds] = useState<string[]>([]);
   const [selectedRalphPrd, setSelectedRalphPrd] = useState<string | null>(null);
@@ -36,16 +35,16 @@ export function useRalphPrds({ folderPath, activeTab }: UseRalphPrdsOptions) {
 
   // Handle pending link when session ID becomes available
   useEffect(() => {
-    const liveSessionId = store.state.liveSessionId;
+    const viewedSessionId = store.state.viewedSessionId;
 
-    if (pendingLinkPrd && liveSessionId && liveSessionId !== "__pending__" && folderPath) {
+    if (pendingLinkPrd && viewedSessionId && !viewedSessionId.startsWith("__pending__") && folderPath) {
       invoke("save_ralph_link", {
         folderPath,
-        sessionId: liveSessionId,
+        sessionId: viewedSessionId,
         prdFileName: pendingLinkPrd,
       })
         .then(() => {
-          setRalphLinkedSessionId(liveSessionId);
+          setRalphLinkedSessionId(viewedSessionId);
           setPendingLinkPrd(null);
         })
         .catch((err) => {
@@ -53,7 +52,7 @@ export function useRalphPrds({ folderPath, activeTab }: UseRalphPrdsOptions) {
           setPendingLinkPrd(null);
         });
     }
-  }, [pendingLinkPrd, store.state.liveSessionId, folderPath]);
+  }, [pendingLinkPrd, store.state.viewedSessionId, folderPath]);
 
   // Define selectRalphPrd first since handleRalphPrdsChange depends on it
   const selectRalphPrd = useCallback(
@@ -89,7 +88,7 @@ export function useRalphPrds({ folderPath, activeTab }: UseRalphPrdsOptions) {
             store.viewSession(link.session_id, filteredHistory);
           } else {
             setRalphLinkedSessionId(null);
-            if (!getIsRunningRef()) {
+            if (!store.hasAnyRunning()) {
               store.viewSession(null);
             }
           }
@@ -98,7 +97,7 @@ export function useRalphPrds({ folderPath, activeTab }: UseRalphPrdsOptions) {
         }
       }
     },
-    [folderPath, store, getIsRunningRef]
+    [folderPath, store]
   );
 
   // Keep selectRalphPrdRef in sync (needed for file watcher callback stability)
@@ -126,21 +125,21 @@ export function useRalphPrds({ folderPath, activeTab }: UseRalphPrdsOptions) {
         if (
           added.length === 1 &&
           removed.length === 0 &&
-          getIsRunningRef() &&
+          store.hasAnyRunning() &&
           activeTabRef.current === "ralph"
         ) {
           selectRalphPrdRef.current?.(added[0], false);
-          // Link session to this PRD
-          const liveSessionId = getLiveSessionIdRef();
-          if (liveSessionId && liveSessionId !== "__pending__") {
+          // Link session to this PRD using the currently viewed session
+          const viewedSessionId = store.state.viewedSessionId;
+          if (viewedSessionId && !viewedSessionId.startsWith("__pending__")) {
             // Session ID is already available, save link immediately
             invoke("save_ralph_link", {
               folderPath,
-              sessionId: liveSessionId,
+              sessionId: viewedSessionId,
               prdFileName: added[0],
             })
               .then(() => {
-                setRalphLinkedSessionId(liveSessionId);
+                setRalphLinkedSessionId(viewedSessionId);
               })
               .catch(console.error);
           } else {
@@ -159,7 +158,7 @@ export function useRalphPrds({ folderPath, activeTab }: UseRalphPrdsOptions) {
         console.error("Failed to load ralph prds:", err);
       }
     },
-    [folderPath, getLiveSessionIdRef, getIsRunningRef]
+    [folderPath, store]
   );
 
   const clearSelection = useCallback(() => {

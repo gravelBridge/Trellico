@@ -26,14 +26,14 @@ function App() {
   // Message store
   const store = useMessageStore();
   const messages = store.viewedMessages;
-  const isRunning = store.state.isRunning;
+  const isViewingRunning = store.isViewingRunningSession;
 
   // Store ralph iterations handler in a ref that can be updated
-  const handleClaudeExitRef = React.useRef<((messages: import("@/types").ClaudeMessage[]) => void) | null>(null);
+  const handleClaudeExitRef = React.useRef<((messages: import("@/types").ClaudeMessage[], sessionId: string) => void) | null>(null);
 
   // Claude session hook - callback uses ref to get latest handler
-  const claudeExitCallback = useCallback((msgs: import("@/types").ClaudeMessage[]) => {
-    handleClaudeExitRef.current?.(msgs);
+  const claudeExitCallback = useCallback((msgs: import("@/types").ClaudeMessage[], sessionId: string) => {
+    handleClaudeExitRef.current?.(msgs, sessionId);
   }, []);
 
   const { runClaude, stopClaude } = useClaudeSession({ onClaudeExit: claudeExitCallback });
@@ -117,7 +117,8 @@ function App() {
   // Handle message submission
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!message.trim() || !folderPath || isRunning) return;
+    // Only block if the currently viewed session is running
+    if (!message.trim() || !folderPath || isViewingRunning) return;
 
     const isNewSession = !store.state.viewedSessionId;
 
@@ -204,7 +205,7 @@ function App() {
         onSelectRalphPrd={handleSelectRalphPrd}
         folderPath={folderPath}
         onChangeFolder={selectFolder}
-        isRunning={isRunning}
+        isRunning={store.hasAnyRunning()}
         ralphIterations={ralphIterations.iterations}
         selectedRalphIteration={ralphIterations.selectedIteration}
         onSelectRalphIteration={handleSelectRalphIteration}
@@ -223,7 +224,7 @@ function App() {
             onInputChange={setMessage}
             onSubmit={handleSubmit}
             onStop={stopClaude}
-            isRunning={isRunning}
+            isRunning={isViewingRunning}
             linkedSessionId={linkedSessionId}
             sidebarOpen={sidebarOpen}
             selectedPlan={selectedPlan}
@@ -242,14 +243,7 @@ function App() {
             onInputChange={setMessage}
             onSubmit={handleSubmit}
             onStop={handleStop}
-            isRunning={isRunning && (() => {
-              // Only show running state if viewing the currently running iteration (or no iteration selected)
-              const selected = ralphIterations.selectedIteration;
-              if (!selected) return true;
-              const iters = ralphIterations.iterations[selected.prd] || [];
-              const iter = iters.find(i => i.iteration_number === selected.iteration);
-              return iter?.status === "running";
-            })()}
+            isRunning={isViewingRunning}
             ralphLinkedSessionId={ralphLinkedSessionId}
             sidebarOpen={sidebarOpen}
             selectedRalphPrd={selectedRalphPrd}
@@ -268,7 +262,7 @@ function App() {
             onInputChange={setMessage}
             onSubmit={handleSubmit}
             onStop={stopClaude}
-            isRunning={isRunning}
+            isRunning={isViewingRunning}
             activeTab={activeTab}
           />
         ) : (
@@ -287,7 +281,7 @@ function App() {
                   onChange={setMessage}
                   onSubmit={handleSubmit}
                   onStop={stopClaude}
-                  isRunning={isRunning}
+                  isRunning={isViewingRunning}
                   placeholder={store.state.viewedSessionId ? "Follow up..." : "Ask anything..."}
                   rows={3}
                   autoFocus

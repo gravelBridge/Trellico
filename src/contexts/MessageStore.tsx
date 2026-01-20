@@ -4,87 +4,97 @@ import { MessageStoreContext, type MessageStoreState, type MessageStoreContextVa
 
 // Action types
 type MessageAction =
-  | { type: "START_LIVE_SESSION"; resumeSessionId?: string }
-  | { type: "SET_LIVE_SESSION_ID"; sessionId: string }
-  | { type: "END_LIVE_SESSION" }
-  | { type: "ADD_MESSAGE"; message: ClaudeMessage }
+  | { type: "START_PROCESS"; processId: string; sessionId?: string }
+  | { type: "SET_LIVE_SESSION_ID"; sessionId: string; processId: string }
+  | { type: "END_PROCESS"; processId: string }
+  | { type: "ADD_MESSAGE"; message: ClaudeMessage; processId: string }
   | { type: "VIEW_SESSION"; sessionId: string | null; messages?: ClaudeMessage[] }
   | { type: "LOAD_SESSION_HISTORY"; sessionId: string; messages: ClaudeMessage[] }
-  | { type: "CLEAR_VIEW" }
-  | { type: "SET_RUNNING"; isRunning: boolean };
+  | { type: "CLEAR_VIEW" };
 
 const initialState: MessageStoreState = {
   sessions: {},
-  liveSessionId: null,
+  runningProcesses: {},
   viewedSessionId: null,
-  isRunning: false,
 };
 
 // Temporary session ID for sessions that haven't received their ID yet
-const PENDING_SESSION = "__pending__";
+const PENDING_PREFIX = "__pending__";
 
 function messageReducer(state: MessageStoreState, action: MessageAction): MessageStoreState {
   switch (action.type) {
-    case "START_LIVE_SESSION":
-      // If resuming an existing session, keep its messages and use its ID
-      if (action.resumeSessionId) {
-        return {
-          ...state,
-          liveSessionId: action.resumeSessionId,
-          viewedSessionId: action.resumeSessionId,
-          isRunning: true,
-        };
-      }
-      // Start a new live session with pending ID
+    case "START_PROCESS": {
+      const sessionId = action.sessionId || `${PENDING_PREFIX}${action.processId}`;
       return {
         ...state,
-        liveSessionId: PENDING_SESSION,
-        viewedSessionId: PENDING_SESSION,
+        runningProcesses: {
+          ...state.runningProcesses,
+          [action.processId]: sessionId,
+        },
+        viewedSessionId: sessionId,
         sessions: {
           ...state.sessions,
-          [PENDING_SESSION]: [],
+          [sessionId]: state.sessions[sessionId] || [],
         },
-        isRunning: true,
       };
+    }
 
     case "SET_LIVE_SESSION_ID": {
-      // If we're resuming an existing session (not pending), just update the ID if needed
-      if (state.liveSessionId !== PENDING_SESSION) {
-        // Session was resumed, no migration needed
-        return state;
+      const oldSessionId = state.runningProcesses[action.processId];
+      if (!oldSessionId || oldSessionId === action.sessionId) {
+        // Session ID unchanged or process not found
+        return {
+          ...state,
+          runningProcesses: {
+            ...state.runningProcesses,
+            [action.processId]: action.sessionId,
+          },
+        };
       }
 
       // Migrate from pending session to real session ID
-      const pendingMessages = state.sessions[PENDING_SESSION] || [];
+      const pendingMessages = state.sessions[oldSessionId] || [];
       const newSessions = { ...state.sessions };
-      delete newSessions[PENDING_SESSION];
-      newSessions[action.sessionId] = pendingMessages;
+
+      // Only delete if it was a pending session
+      if (oldSessionId.startsWith(PENDING_PREFIX)) {
+        delete newSessions[oldSessionId];
+      }
+
+      newSessions[action.sessionId] = [
+        ...(newSessions[action.sessionId] || []),
+        ...pendingMessages,
+      ];
 
       return {
         ...state,
-        liveSessionId: action.sessionId,
-        viewedSessionId: state.viewedSessionId === PENDING_SESSION ? action.sessionId : state.viewedSessionId,
+        runningProcesses: {
+          ...state.runningProcesses,
+          [action.processId]: action.sessionId,
+        },
+        viewedSessionId: state.viewedSessionId === oldSessionId ? action.sessionId : state.viewedSessionId,
         sessions: newSessions,
       };
     }
 
-    case "END_LIVE_SESSION":
+    case "END_PROCESS": {
+      const remainingProcesses = { ...state.runningProcesses };
+      delete remainingProcesses[action.processId];
       return {
         ...state,
-        liveSessionId: null,
-        isRunning: false,
+        runningProcesses: remainingProcesses,
       };
+    }
 
     case "ADD_MESSAGE": {
-      // Add message to the live session
-      const targetSession = state.liveSessionId;
-      if (!targetSession) return state;
+      const sessionId = state.runningProcesses[action.processId];
+      if (!sessionId) return state;
 
       return {
         ...state,
         sessions: {
           ...state.sessions,
-          [targetSession]: [...(state.sessions[targetSession] || []), action.message],
+          [sessionId]: [...(state.sessions[sessionId] || []), action.message],
         },
       };
     }
@@ -123,12 +133,6 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
         viewedSessionId: null,
       };
 
-    case "SET_RUNNING":
-      return {
-        ...state,
-        isRunning: action.isRunning,
-      };
-
     default:
       return state;
   }
@@ -159,28 +163,31 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
   // Use useSyncExternalStore to properly subscribe to our store
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
 
-  // Actions - all dispatch to store
-  const startLiveSession = useCallback(
-    (resumeSessionId?: string) => {
-      store.dispatch({ type: "START_LIVE_SESSION", resumeSessionId });
+  // Actions
+  const startProcess = useCallback(
+    (processId: string, sessionId?: string) => {
+      store.dispatch({ type: "START_PROCESS", processId, sessionId });
     },
     [store]
   );
 
   const setLiveSessionId = useCallback(
-    (sessionId: string) => {
-      store.dispatch({ type: "SET_LIVE_SESSION_ID", sessionId });
+    (sessionId: string, processId: string) => {
+      store.dispatch({ type: "SET_LIVE_SESSION_ID", sessionId, processId });
     },
     [store]
   );
 
-  const endLiveSession = useCallback(() => {
-    store.dispatch({ type: "END_LIVE_SESSION" });
-  }, [store]);
+  const endProcess = useCallback(
+    (processId: string) => {
+      store.dispatch({ type: "END_PROCESS", processId });
+    },
+    [store]
+  );
 
   const addMessage = useCallback(
-    (message: ClaudeMessage) => {
-      store.dispatch({ type: "ADD_MESSAGE", message });
+    (message: ClaudeMessage, processId: string) => {
+      store.dispatch({ type: "ADD_MESSAGE", message, processId });
     },
     [store]
   );
@@ -203,14 +210,7 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
     store.dispatch({ type: "CLEAR_VIEW" });
   }, [store]);
 
-  const setRunning = useCallback(
-    (isRunning: boolean) => {
-      store.dispatch({ type: "SET_RUNNING", isRunning });
-    },
-    [store]
-  );
-
-  // Synchronous state access - always returns current state from store
+  // Synchronous state access
   const getStateRef = useCallback(() => store.getState(), [store]);
 
   const getViewedMessagesRef = useCallback(() => {
@@ -219,41 +219,59 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
     return s.sessions[s.viewedSessionId] || [];
   }, [store]);
 
-  const getLiveMessagesRef = useCallback(() => {
-    const s = store.getState();
-    if (!s.liveSessionId) return [];
-    return s.sessions[s.liveSessionId] || [];
-  }, [store]);
+  const getSessionMessagesRef = useCallback(
+    (sessionId: string) => {
+      const s = store.getState();
+      return s.sessions[sessionId] || [];
+    },
+    [store]
+  );
 
-  const getLiveSessionIdRef = useCallback(() => {
-    return store.getState().liveSessionId;
-  }, [store]);
+  const getProcessSessionId = useCallback(
+    (processId: string) => {
+      return store.getState().runningProcesses[processId] || null;
+    },
+    [store]
+  );
 
-  const getIsRunningRef = useCallback(() => {
-    return store.getState().isRunning;
+  // Check if a session is running
+  const isSessionRunning = useCallback(
+    (sessionId: string | null) => {
+      if (!sessionId) return false;
+      const s = store.getState();
+      return Object.values(s.runningProcesses).includes(sessionId);
+    },
+    [store]
+  );
+
+  // Check if any process is running
+  const hasAnyRunning = useCallback(() => {
+    return Object.keys(store.getState().runningProcesses).length > 0;
   }, [store]);
 
   // Derived values for rendering
   const viewedMessages = state.viewedSessionId ? state.sessions[state.viewedSessionId] || [] : [];
-  const isViewingLiveSession = state.viewedSessionId === state.liveSessionId && state.liveSessionId !== null;
+  const isViewingRunningSession = state.viewedSessionId
+    ? Object.values(state.runningProcesses).includes(state.viewedSessionId)
+    : false;
 
   const value: MessageStoreContextValue = {
     state,
     viewedMessages,
-    isViewingLiveSession,
-    startLiveSession,
+    isViewingRunningSession,
+    isSessionRunning,
+    hasAnyRunning,
+    startProcess,
     setLiveSessionId,
-    endLiveSession,
+    endProcess,
     addMessage,
     viewSession,
     loadSessionHistory,
     clearView,
-    setRunning,
     getStateRef,
     getViewedMessagesRef,
-    getLiveMessagesRef,
-    getLiveSessionIdRef,
-    getIsRunningRef,
+    getSessionMessagesRef,
+    getProcessSessionId,
   };
 
   return <MessageStoreContext.Provider value={value}>{children}</MessageStoreContext.Provider>;

@@ -10,7 +10,6 @@ interface UsePlansOptions {
 
 export function usePlans({ folderPath }: UsePlansOptions) {
   const store = useMessageStore();
-  const { getLiveSessionIdRef, getIsRunningRef } = store;
 
   const [plans, setPlans] = useState<string[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
@@ -30,16 +29,16 @@ export function usePlans({ folderPath }: UsePlansOptions) {
 
   // Handle pending link when session ID becomes available
   useEffect(() => {
-    const liveSessionId = store.state.liveSessionId;
+    const viewedSessionId = store.state.viewedSessionId;
 
-    if (pendingLinkPlan && liveSessionId && liveSessionId !== "__pending__" && folderPath) {
+    if (pendingLinkPlan && viewedSessionId && !viewedSessionId.startsWith("__pending__") && folderPath) {
       invoke("save_session_link", {
         folderPath,
-        sessionId: liveSessionId,
+        sessionId: viewedSessionId,
         planFileName: pendingLinkPlan,
       })
         .then(() => {
-          setLinkedSessionId(liveSessionId);
+          setLinkedSessionId(viewedSessionId);
           setPendingLinkPlan(null);
         })
         .catch((err) => {
@@ -47,7 +46,7 @@ export function usePlans({ folderPath }: UsePlansOptions) {
           setPendingLinkPlan(null);
         });
     }
-  }, [pendingLinkPlan, store.state.liveSessionId, folderPath]);
+  }, [pendingLinkPlan, store.state.viewedSessionId, folderPath]);
 
   // Define selectPlan first since handlePlansChange depends on it
   const selectPlan = useCallback(
@@ -90,7 +89,7 @@ export function usePlans({ folderPath }: UsePlansOptions) {
           } else {
             setLinkedSessionId(null);
             // Don't clear session if we're in the middle of creating a plan
-            if (!getIsRunningRef()) {
+            if (!store.hasAnyRunning()) {
               store.viewSession(null);
             }
           }
@@ -100,7 +99,7 @@ export function usePlans({ folderPath }: UsePlansOptions) {
         }
       }
     },
-    [folderPath, store, getIsRunningRef]
+    [folderPath, store]
   );
 
   // Keep selectPlanRef in sync (needed for file watcher callback stability)
@@ -165,21 +164,21 @@ export function usePlans({ folderPath }: UsePlansOptions) {
         // Detect new plan created (while Claude is running = auto-select)
         if (added.length === 1 && removed.length === 0) {
           // Use synchronous getter - always returns current value
-          if (getIsRunningRef()) {
+          if (store.hasAnyRunning()) {
             const newPlan = added[0];
             selectPlanRef.current?.(newPlan, false);
 
-            // Link to current session
-            const liveSessionId = getLiveSessionIdRef();
-            if (liveSessionId && liveSessionId !== "__pending__") {
+            // Link to current session using the currently viewed session
+            const viewedSessionId = store.state.viewedSessionId;
+            if (viewedSessionId && !viewedSessionId.startsWith("__pending__")) {
               // Session ID is already available, save link immediately
               invoke("save_session_link", {
                 folderPath,
-                sessionId: liveSessionId,
+                sessionId: viewedSessionId,
                 planFileName: newPlan,
               })
                 .then(() => {
-                  setLinkedSessionId(liveSessionId);
+                  setLinkedSessionId(viewedSessionId);
                 })
                 .catch((err) => {
                   console.error("Failed to save session link:", err);
@@ -208,7 +207,7 @@ export function usePlans({ folderPath }: UsePlansOptions) {
         console.error("Failed to load plans:", err);
       }
     },
-    [folderPath, reloadSelectedPlan, getLiveSessionIdRef, getIsRunningRef]
+    [folderPath, reloadSelectedPlan, store]
   );
 
   const clearSelection = useCallback(() => {
