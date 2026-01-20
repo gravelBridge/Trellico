@@ -100,18 +100,17 @@ export function Sidebar({
 }: SidebarProps) {
   const [expandedPrds, setExpandedPrds] = useState<Set<string>>(new Set());
 
-  // Auto-expand PRD when ralphing starts (permanently)
+  // Auto-expand PRD when ralphing starts
   useEffect(() => {
-    if (ralphingPrd && !expandedPrds.has(ralphingPrd)) {
-      queueMicrotask(() => {
-        setExpandedPrds((prev) => {
-          const next = new Set(prev);
-          next.add(ralphingPrd);
-          return next;
-        });
+    if (ralphingPrd) {
+      setExpandedPrds((prev) => {
+        if (prev.has(ralphingPrd)) return prev;
+        const next = new Set(prev);
+        next.add(ralphingPrd);
+        return next;
       });
     }
-  }, [ralphingPrd, expandedPrds]);
+  }, [ralphingPrd]);
 
   const togglePrdExpand = (prd: string) => {
     setExpandedPrds((prev) => {
