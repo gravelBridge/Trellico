@@ -89,6 +89,9 @@ function App() {
   // Split view state
   const [splitPosition, setSplitPosition] = useState(50);
   const [linkedSessionId, setLinkedSessionId] = useState<string | null>(null);
+  // Right panel needs padding when sidebar is closed AND left panel is nearly collapsed
+  const leftPanelCollapsed = splitPosition < 6;
+  const rightPanelNeedsPadding = !sidebarOpen && leftPanelCollapsed;
 
   useEffect(() => {
     let unlisteners: UnlistenFn[] = [];
@@ -759,7 +762,7 @@ function App() {
           <SplitView
             leftPanel={
               <div className="flex flex-col h-full">
-                <div className="h-12 shrink-0 flex items-center px-4 border-b" data-tauri-drag-region>
+                <div className={cn("h-12 shrink-0 flex items-center px-4 border-b", !sidebarOpen && "pl-32")} data-tauri-drag-region>
                   <span className="text-sm font-medium text-muted-foreground">Chat</span>
                 </div>
                 {messages.length > 0 ? (
@@ -823,7 +826,7 @@ function App() {
             }
             rightPanel={
               <div className="flex flex-col h-full">
-                <div className="h-12 shrink-0 flex items-center px-4 border-b" data-tauri-drag-region>
+                <div className={cn("h-12 shrink-0 flex items-center px-4 border-b", rightPanelNeedsPadding && "pl-32")} data-tauri-drag-region>
                   <h2 className="text-sm font-medium truncate min-w-0">{kebabToTitle(selectedPlan)}</h2>
                 </div>
                 <div className="flex-1 overflow-auto">
