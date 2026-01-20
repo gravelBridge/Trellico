@@ -1051,7 +1051,7 @@ function App() {
             rightPanel={
               <div className="flex flex-col h-full">
                 <div className={cn("h-12 shrink-0 flex items-center justify-between px-4 border-b gap-2", rightPanelNeedsPadding && "pl-32")} data-tauri-drag-region>
-                  <h2 className="text-sm font-medium truncate min-w-0">{kebabToTitle(selectedPlan)}</h2>
+                  <h2 className="text-sm font-medium truncate min-w-0">{selectedPlan}.md</h2>
                   <Button
                     size="sm"
                     onClick={createRalphSession}
@@ -1164,7 +1164,7 @@ function App() {
             rightPanel={
               <div className="flex flex-col h-full">
                 <div className={cn("h-12 shrink-0 flex items-center px-4 border-b", rightPanelNeedsPadding && "pl-32")} data-tauri-drag-region>
-                  <h2 className="text-sm font-medium truncate">{kebabToTitle(selectedRalphPrd)}.json</h2>
+                  <h2 className="text-sm font-medium truncate">{selectedRalphPrd}.json</h2>
                 </div>
                 <div className="flex-1 overflow-auto">
                   <pre className="px-4 py-4 text-sm font-mono whitespace-pre-wrap select-text">
