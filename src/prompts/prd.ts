@@ -7,9 +7,10 @@ Create detailed Product Requirements Documents that are clear, actionable, and s
 ## The Job
 
 1. Receive a feature description from the user (below)
-2. Ask 3-5 essential clarifying questions (with lettered options)
-3. Generate a structured PRD based on answers
-4. Save to \`.trellico/plans/[feature-name].md\`
+2. Explore the codebase to gather sufficient context
+3. Ask 3-5 essential clarifying questions (with lettered options)
+4. Generate a structured PRD based on answers
+5. Save to \`.trellico/plans/[feature-name].md\`
 
 **Important:** Do NOT start implementing. Just create the PRD.
 

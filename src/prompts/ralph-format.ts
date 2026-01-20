@@ -6,7 +6,7 @@ Converts existing PRDs to the JSON format that Ralph uses for autonomous executi
 
 ## The Job
 
-Take a PRD (markdown file or text) and convert it to \`[prd-file-name].json\` in the .trellico/ralph-prd directory.
+Take a PRD (markdown file or text) and convert it to \`prd.json\` in the .trellico/ralph/[prd-file-name] directory.
 
 ---
 
@@ -224,7 +224,7 @@ Add ability to mark tasks with different statuses.
 
 ## Checklist Before Saving
 
-Before writing [prd-file-name].json, verify:
+Before writing prd.json in the .trellico/ralph/[prd-file-name] directory, verify:
 
 - [ ] Each story is completable in one iteration (small enough)
 - [ ] Stories are ordered by dependency (schema to backend to UI)

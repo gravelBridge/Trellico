@@ -94,20 +94,22 @@ fn read_plan(folder_path: String, plan_name: String) -> Result<String, String> {
 
 #[tauri::command]
 fn list_ralph_prds(folder_path: String) -> Result<Vec<String>, String> {
-    let ralph_prd_path = Path::new(&folder_path).join(".trellico").join("ralph-prd");
-    if !ralph_prd_path.exists() {
+    let ralph_path = Path::new(&folder_path).join(".trellico").join("ralph");
+    if !ralph_path.exists() {
         return Ok(vec![]);
     }
 
     let mut prds = Vec::new();
-    let entries = fs::read_dir(&ralph_prd_path)
-        .map_err(|e| format!("Failed to read ralph-prd directory: {}", e))?;
+    let entries = fs::read_dir(&ralph_path)
+        .map_err(|e| format!("Failed to read ralph directory: {}", e))?;
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "json") {
-            if let Some(stem) = path.file_stem() {
-                if let Some(name) = stem.to_str() {
+        // Check if it's a directory containing prd.json
+        if path.is_dir() {
+            let prd_file = path.join("prd.json");
+            if prd_file.exists() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     prds.push(name.to_string());
                 }
             }
@@ -122,8 +124,9 @@ fn list_ralph_prds(folder_path: String) -> Result<Vec<String>, String> {
 fn read_ralph_prd(folder_path: String, prd_name: String) -> Result<String, String> {
     let prd_path = Path::new(&folder_path)
         .join(".trellico")
-        .join("ralph-prd")
-        .join(format!("{}.json", prd_name));
+        .join("ralph")
+        .join(&prd_name)
+        .join("prd.json");
 
     fs::read_to_string(&prd_path)
         .map_err(|e| format!("Failed to read ralph prd file: {}", e))
@@ -325,15 +328,16 @@ fn get_plan_files(plans_path: &Path) -> HashSet<String> {
         .unwrap_or_default()
 }
 
-fn get_ralph_prd_files(ralph_prd_path: &Path) -> HashSet<String> {
-    fs::read_dir(ralph_prd_path)
+fn get_ralph_prd_files(ralph_path: &Path) -> HashSet<String> {
+    fs::read_dir(ralph_path)
         .map(|entries| {
             entries
                 .flatten()
                 .filter_map(|e| {
                     let p = e.path();
-                    if p.is_file() && p.extension().map_or(false, |ext| ext == "json") {
-                        p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
+                    // Check if it's a directory containing prd.json
+                    if p.is_dir() && p.join("prd.json").exists() {
+                        p.file_name().and_then(|s| s.to_str()).map(|s| s.to_string())
                     } else {
                         None
                     }
@@ -452,21 +456,21 @@ fn watch_plans(app: AppHandle, folder_path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn watch_ralph_prds(app: AppHandle, folder_path: String) -> Result<(), String> {
-    let ralph_prd_path = PathBuf::from(&folder_path).join(".trellico").join("ralph-prd");
+    let ralph_path = PathBuf::from(&folder_path).join(".trellico").join("ralph");
 
-    // Create ralph-prd directory if it doesn't exist
-    if !ralph_prd_path.exists() {
-        fs::create_dir_all(&ralph_prd_path)
-            .map_err(|e| format!("Failed to create ralph-prd directory: {}", e))?;
+    // Create ralph directory if it doesn't exist
+    if !ralph_path.exists() {
+        fs::create_dir_all(&ralph_path)
+            .map_err(|e| format!("Failed to create ralph directory: {}", e))?;
     }
 
     // Initialize known ralph PRDs
     if let Ok(mut known) = KNOWN_RALPH_PRDS.lock() {
-        *known = get_ralph_prd_files(&ralph_prd_path);
+        *known = get_ralph_prd_files(&ralph_path);
     }
 
     let app_clone = app.clone();
-    let ralph_prd_path_clone = ralph_prd_path.clone();
+    let ralph_path_clone = ralph_path.clone();
     let watcher = RecommendedWatcher::new(
         move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res {
@@ -474,7 +478,7 @@ fn watch_ralph_prds(app: AppHandle, folder_path: String) -> Result<(), String> {
                     EventKind::Create(_)
                     | EventKind::Modify(_)
                     | EventKind::Remove(_) => {
-                        let current_files = get_ralph_prd_files(&ralph_prd_path_clone);
+                        let current_files = get_ralph_prd_files(&ralph_path_clone);
 
                         if let Ok(mut known) = KNOWN_RALPH_PRDS.lock() {
                             *known = current_files;
@@ -499,7 +503,7 @@ fn watch_ralph_prds(app: AppHandle, folder_path: String) -> Result<(), String> {
     // Start watching
     if let Ok(mut guard) = RALPH_PRD_WATCHER.lock() {
         if let Some(ref mut w) = *guard {
-            w.watch(&ralph_prd_path, RecursiveMode::Recursive)
+            w.watch(&ralph_path, RecursiveMode::Recursive)
                 .map_err(|e| format!("Failed to watch directory: {}", e))?;
         }
     }

@@ -136,7 +136,7 @@ function App() {
     setActiveTab("ralph");
 
     // Compose message with ralph prompt + plan filename instruction + plan content
-    const fullMessage = `${ralphFormatPrompt}\n\nPlan filename: ${planFileName}.md\nOutput the JSON to: .trellico/ralph-prd/${planFileName}.json\n\n${planContent}`;
+    const fullMessage = `${ralphFormatPrompt}\n\nPlan filename: ${planFileName}.md\nOutput the JSON to: .trellico/ralph/${planFileName}/prd.json\n\n${planContent}`;
 
     // Start Claude session (no user message shown - the prompt is hidden)
     resetAutoScroll();

@@ -83,6 +83,10 @@ export function MessageItem({ message: msg, index }: MessageItemProps) {
       );
     }
     case "user": {
+      // Skip subagent prompts (they have a parent_tool_use_id)
+      if (msg.parent_tool_use_id) {
+        return null;
+      }
       // Handle both formats: content as string (from JSONL) or content as array (from stream)
       let content: string | undefined;
       if (typeof msg.message?.content === "string") {

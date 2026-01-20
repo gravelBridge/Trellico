@@ -13,6 +13,8 @@ export interface ClaudeMessage {
   total_cost_usd?: number;
   duration_ms?: number;
   session_id?: string;
+  /** If present, this message is part of a subagent context (not a real user message) */
+  parent_tool_use_id?: string;
 }
 
 export interface SessionPlanLink {
