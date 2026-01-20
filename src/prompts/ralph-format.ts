@@ -159,7 +159,7 @@ Add ability to mark tasks with different statuses.
 \`\`\`json
 {
   "project": "TaskApp",
-  "branchName": "ralph/task-status",
+  "branchName": "trellico/task-status",
   "description": "Task Status Feature - Track task progress with status indicators",
   "userStories": [
     {
