@@ -33,7 +33,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { prdPrompt } from "@/prompts";
+import { prdPrompt, ralphFormatPrompt } from "@/prompts";
 
 interface ClaudeMessage {
   type: string;
@@ -55,6 +55,7 @@ interface ClaudeMessage {
 interface SessionPlanLink {
   session_id: string;
   plan_file_name: string;
+  link_type: "plan" | "ralph_prd";
   created_at: string;
   updated_at: string;
 }
@@ -86,12 +87,37 @@ function App() {
   const prevPlansRef = useRef<string[]>([]);
   const plansDebounceRef = useRef<number | null>(null);
 
+  // Ralph PRD state
+  const [ralphPrds, setRalphPrds] = useState<string[]>([]);
+  const [selectedRalphPrd, setSelectedRalphPrd] = useState<string | null>(null);
+  const [ralphPrdContent, setRalphPrdContent] = useState<string | null>(null);
+  const [ralphLinkedSessionId, setRalphLinkedSessionId] = useState<string | null>(null);
+  const prevRalphPrdsRef = useRef<string[]>([]);
+  const ralphPrdsDebounceRef = useRef<number | null>(null);
+  const selectedRalphPrdRef = useRef<string | null>(null);
+  const activeTabRef = useRef(activeTab);
+  const isRunningRef = useRef(isRunning);
+  const sessionIdRef = useRef(sessionId);
+
   // Split view state
   const [splitPosition, setSplitPosition] = useState(50);
   const [linkedSessionId, setLinkedSessionId] = useState<string | null>(null);
   // Right panel needs padding when sidebar is closed AND left panel is nearly collapsed
   const leftPanelCollapsed = splitPosition < 6;
   const rightPanelNeedsPadding = !sidebarOpen && leftPanelCollapsed;
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    isRunningRef.current = isRunning;
+  }, [isRunning]);
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
 
   useEffect(() => {
     let unlisteners: UnlistenFn[] = [];
@@ -189,6 +215,41 @@ function App() {
       if (plansDebounceRef.current) clearTimeout(plansDebounceRef.current);
     };
   }, [folderPath]);
+
+  // Ralph PRD file watching
+  useEffect(() => {
+    if (!folderPath) return;
+
+    // Initial load
+    handleRalphPrdsChange(true);
+
+    // Start watching for file changes
+    invoke("watch_ralph_prds", { folderPath }).catch((err) => {
+      console.error("Failed to start watching ralph prds:", err);
+    });
+
+    // Listener for ralph PRD changes
+    let unlisten: UnlistenFn | null = null;
+    listen("ralph-prd-changed", () => {
+      if (ralphPrdsDebounceRef.current) {
+        clearTimeout(ralphPrdsDebounceRef.current);
+      }
+      ralphPrdsDebounceRef.current = window.setTimeout(() => {
+        handleRalphPrdsChange(false);
+      }, 100);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+      if (ralphPrdsDebounceRef.current) clearTimeout(ralphPrdsDebounceRef.current);
+    };
+  }, [folderPath]);
+
+  useEffect(() => {
+    selectedRalphPrdRef.current = selectedRalphPrd;
+  }, [selectedRalphPrd]);
 
   // Handle plans list changes - detect renames, additions, removals
   async function handlePlansChange(isInitialLoad: boolean) {
@@ -293,6 +354,13 @@ function App() {
 
   async function selectPlan(planName: string, autoLoadHistory = true) {
     if (!folderPath) return;
+
+    // Clear ralph PRD selection
+    setSelectedRalphPrd(null);
+    setRalphPrdContent(null);
+    setRalphLinkedSessionId(null);
+    selectedRalphPrdRef.current = null;
+
     setSelectedPlan(planName);
 
     try {
@@ -341,10 +409,99 @@ function App() {
     }
   }
 
-  function closePlanViewer() {
+  // Handle ralph PRDs list changes
+  async function handleRalphPrdsChange(isInitialLoad: boolean) {
+    if (!folderPath) return;
+    try {
+      const newPrds = await invoke<string[]>("list_ralph_prds", { folderPath });
+      const oldPrds = prevRalphPrdsRef.current;
+
+      const added = newPrds.filter((p) => !oldPrds.includes(p));
+      const removed = oldPrds.filter((p) => !newPrds.includes(p));
+
+      setRalphPrds(newPrds);
+      prevRalphPrdsRef.current = newPrds;
+
+      if (isInitialLoad) return;
+
+      // Auto-select newly created PRD if Claude is running (creating it)
+      if (added.length === 1 && removed.length === 0 && isRunningRef.current && activeTabRef.current === "ralph") {
+        selectRalphPrd(added[0], false);
+        // Link session to this PRD
+        const currentSessionId = sessionIdRef.current;
+        if (currentSessionId) {
+          invoke("save_ralph_link", {
+            folderPath,
+            sessionId: currentSessionId,
+            prdFileName: added[0],
+          })
+            .then(() => {
+              setRalphLinkedSessionId(currentSessionId);
+            })
+            .catch(console.error);
+        }
+      }
+
+      // If selected was removed, clear selection
+      if (selectedRalphPrdRef.current && removed.includes(selectedRalphPrdRef.current)) {
+        setSelectedRalphPrd(null);
+        setRalphPrdContent(null);
+        selectedRalphPrdRef.current = null;
+      }
+    } catch (err) {
+      console.error("Failed to load ralph prds:", err);
+    }
+  }
+
+  async function selectRalphPrd(prdName: string, autoLoadHistory = true) {
+    if (!folderPath) return;
+
+    // Clear plan selection
     setSelectedPlan(null);
     setPlanContent(null);
     setLinkedSessionId(null);
+    selectedPlanRef.current = null;
+
+    selectedRalphPrdRef.current = prdName;
+    setSelectedRalphPrd(prdName);
+
+    try {
+      const content = await invoke<string>("read_ralph_prd", { folderPath, prdName });
+      setRalphPrdContent(content);
+    } catch (err) {
+      console.error("Failed to read ralph prd:", err);
+      setRalphPrdContent(null);
+    }
+
+    if (autoLoadHistory) {
+      try {
+        const link = await invoke<SessionPlanLink | null>("get_link_by_ralph_prd", {
+          folderPath,
+          prdFileName: prdName,
+        });
+        if (link) {
+          setRalphLinkedSessionId(link.session_id);
+          setSessionId(link.session_id);
+          const history = await invoke<ClaudeMessage[]>("load_session_history", {
+            folderPath,
+            sessionId: link.session_id,
+          });
+          // Skip the first user message (the hidden prompt)
+          const filteredHistory = history.length > 0 && history[0].type === "user"
+            ? history.slice(1)
+            : history;
+          setMessages(filteredHistory);
+        } else {
+          setRalphLinkedSessionId(null);
+          if (!isRunning) {
+            setSessionId(null);
+            setMessages([]);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to get ralph link:", err);
+      }
+    }
   }
 
   function handleScroll() {
@@ -426,7 +583,55 @@ function App() {
     setSelectedPlan(null);
     setPlanContent(null);
     setLinkedSessionId(null);
+    selectedPlanRef.current = null;
+    // Clear ralph PRD state too
+    setSelectedRalphPrd(null);
+    setRalphPrdContent(null);
+    setRalphLinkedSessionId(null);
+    selectedRalphPrdRef.current = null;
     setSplitPosition(50);
+  }
+
+  function createRalphSession() {
+    if (!planContent || !folderPath || !selectedPlan) return;
+
+    const planFileName = selectedPlan; // Store before clearing
+
+    // Clear plan selection (exit split view)
+    setSelectedPlan(null);
+    setPlanContent(null);
+    setLinkedSessionId(null);
+    selectedPlanRef.current = null;
+
+    // Clear Ralph PRD selection too
+    setSelectedRalphPrd(null);
+    setRalphPrdContent(null);
+    setRalphLinkedSessionId(null);
+    selectedRalphPrdRef.current = null;
+
+    // Clear session state
+    setMessages([]);
+    setSessionId(null);
+
+    // Switch to Ralph tab
+    setActiveTab("ralph");
+
+    // Compose message with ralph prompt + plan filename instruction + plan content
+    const fullMessage = `${ralphFormatPrompt}\n\nPlan filename: ${planFileName}.md\nOutput the JSON to: .trellico/ralph-prd/${planFileName}.json\n\n${planContent}`;
+
+    // Start Claude session (no user message shown - the prompt is hidden)
+    bufferRef.current = "";
+    shouldAutoScroll.current = true;
+    setIsRunning(true);
+
+    invoke("run_claude", {
+      message: fullMessage,
+      folderPath,
+      sessionId: null,
+    }).catch((err) => {
+      setMessages((prev) => [...prev, { type: "system", content: `Error: ${err}` }]);
+      setIsRunning(false);
+    });
   }
 
   async function stopClaude() {
@@ -723,8 +928,27 @@ function App() {
                   <p className="text-sm text-muted-foreground px-1 mt-2">No plans yet</p>
                 )}
               </TabsContent>
-              <TabsContent value="ralph" className="mt-4">
-                <p className="text-sm text-muted-foreground px-1">No Ralph sessions yet</p>
+              <TabsContent value="ralph" className="mt-0">
+                {ralphPrds.length > 0 ? (
+                  <div className="mt-2 space-y-0.5">
+                    {ralphPrds.map((prd) => (
+                      <button
+                        key={prd}
+                        onClick={() => selectRalphPrd(prd)}
+                        className={cn(
+                          "w-full text-left px-2 py-1.5 text-sm rounded-md transition-colors truncate",
+                          selectedRalphPrd === prd
+                            ? "bg-muted text-foreground"
+                            : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                        )}
+                      >
+                        {kebabToTitle(prd)}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground px-1 mt-2">No Ralph PRDs yet</p>
+                )}
               </TabsContent>
             </Tabs>
           </div>
@@ -826,8 +1050,15 @@ function App() {
             }
             rightPanel={
               <div className="flex flex-col h-full">
-                <div className={cn("h-12 shrink-0 flex items-center px-4 border-b", rightPanelNeedsPadding && "pl-32")} data-tauri-drag-region>
+                <div className={cn("h-12 shrink-0 flex items-center justify-between px-4 border-b gap-2", rightPanelNeedsPadding && "pl-32")} data-tauri-drag-region>
                   <h2 className="text-sm font-medium truncate min-w-0">{kebabToTitle(selectedPlan)}</h2>
+                  <Button
+                    size="sm"
+                    onClick={createRalphSession}
+                    disabled={isRunning}
+                  >
+                    Create Ralph Session
+                  </Button>
                 </div>
                 <div className="flex-1 overflow-auto">
                   <div className="px-4 py-4 prose prose-neutral prose-sm prose-pre:p-0 [&>*:last-child]:!mb-0 max-w-none select-text">
@@ -857,6 +1088,88 @@ function App() {
                       {planContent}
                     </Markdown>
                   </div>
+                </div>
+              </div>
+            }
+            splitPosition={splitPosition}
+            onSplitChange={setSplitPosition}
+          />
+        ) : selectedRalphPrd && ralphPrdContent ? (
+          /* Split view when ralph PRD is selected */
+          <SplitView
+            leftPanel={
+              <div className="flex flex-col h-full">
+                <div className={cn("h-12 shrink-0 flex items-center px-4 border-b", !sidebarOpen && "pl-32")} data-tauri-drag-region>
+                  <span className="text-sm font-medium text-muted-foreground">Chat</span>
+                </div>
+                {messages.length > 0 ? (
+                  <>
+                    <div className={`flex-1 overflow-auto select-none scroll-container ${showScrollbar ? "is-scrolling" : ""}`} ref={scrollRef} onScroll={handleScroll}>
+                      <div className="px-4 pt-4 pb-4 space-y-3 overflow-hidden">
+                        {messages.map((msg, i) => renderMessage(msg, i))}
+                      </div>
+                    </div>
+                    <div className="select-none border-t p-4">
+                      <div className="relative">
+                        <Textarea
+                          value={message}
+                          onChange={(e) => setMessage(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              if (message.trim() && !isRunning) {
+                                handleSubmit(e);
+                              }
+                            }
+                          }}
+                          placeholder="Follow up..."
+                          rows={2}
+                          className="resize-none text-sm bg-background pr-10"
+                        />
+                        <button
+                          type={isRunning ? "button" : "submit"}
+                          onClick={isRunning ? stopClaude : (e) => handleSubmit(e as unknown as React.FormEvent)}
+                          disabled={!isRunning && !message.trim()}
+                          className={cn(
+                            "absolute bottom-2 right-2 w-6 h-6 rounded-full flex items-center justify-center transition-colors",
+                            isRunning
+                              ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                              : message.trim()
+                                ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                                : "bg-muted text-muted-foreground"
+                          )}
+                        >
+                          {isRunning ? (
+                            <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
+                              <rect x="1" y="1" width="10" height="10" rx="1" />
+                            </svg>
+                          ) : (
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M8 12V4M4 8l4-4 4 4" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center p-4">
+                    <p className="text-sm text-muted-foreground text-center">
+                      {ralphLinkedSessionId ? "Loading chat history..." : "No chat history for this Ralph PRD"}
+                    </p>
+                  </div>
+                )}
+              </div>
+            }
+            rightPanel={
+              <div className="flex flex-col h-full">
+                <div className={cn("h-12 shrink-0 flex items-center px-4 border-b", rightPanelNeedsPadding && "pl-32")} data-tauri-drag-region>
+                  <h2 className="text-sm font-medium truncate">{kebabToTitle(selectedRalphPrd)}.json</h2>
+                </div>
+                <div className="flex-1 overflow-auto">
+                  <pre className="px-4 py-4 text-sm font-mono whitespace-pre-wrap select-text">
+                    {ralphPrdContent}
+                  </pre>
                 </div>
               </div>
             }

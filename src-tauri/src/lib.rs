@@ -21,8 +21,14 @@ static PLANS_WATCHER: Mutex<Option<RecommendedWatcher>> = Mutex::new(None);
 struct SessionPlanLink {
     session_id: String,
     plan_file_name: String,
+    #[serde(default = "default_link_type")]
+    link_type: String,  // "plan" or "ralph_prd"
     created_at: String,
     updated_at: String,
+}
+
+fn default_link_type() -> String {
+    "plan".to_string()
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -86,6 +92,43 @@ fn read_plan(folder_path: String, plan_name: String) -> Result<String, String> {
         .map_err(|e| format!("Failed to read plan file: {}", e))
 }
 
+#[tauri::command]
+fn list_ralph_prds(folder_path: String) -> Result<Vec<String>, String> {
+    let ralph_prd_path = Path::new(&folder_path).join(".trellico").join("ralph-prd");
+    if !ralph_prd_path.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut prds = Vec::new();
+    let entries = fs::read_dir(&ralph_prd_path)
+        .map_err(|e| format!("Failed to read ralph-prd directory: {}", e))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() && path.extension().map_or(false, |ext| ext == "json") {
+            if let Some(stem) = path.file_stem() {
+                if let Some(name) = stem.to_str() {
+                    prds.push(name.to_string());
+                }
+            }
+        }
+    }
+
+    prds.sort();
+    Ok(prds)
+}
+
+#[tauri::command]
+fn read_ralph_prd(folder_path: String, prd_name: String) -> Result<String, String> {
+    let prd_path = Path::new(&folder_path)
+        .join(".trellico")
+        .join("ralph-prd")
+        .join(format!("{}.json", prd_name));
+
+    fs::read_to_string(&prd_path)
+        .map_err(|e| format!("Failed to read ralph prd file: {}", e))
+}
+
 fn get_session_links_path(folder_path: &str) -> PathBuf {
     Path::new(folder_path).join(".trellico").join("session-links.json")
 }
@@ -120,14 +163,15 @@ fn save_session_link(folder_path: String, session_id: String, plan_file_name: St
 
     let now = Utc::now().to_rfc3339();
 
-    // Check if link already exists
-    if let Some(existing) = store.links.iter_mut().find(|l| l.plan_file_name == plan_file_name) {
+    // Check if link already exists (for plans)
+    if let Some(existing) = store.links.iter_mut().find(|l| l.plan_file_name == plan_file_name && l.link_type == "plan") {
         existing.session_id = session_id;
         existing.updated_at = now;
     } else {
         store.links.push(SessionPlanLink {
             session_id,
             plan_file_name,
+            link_type: "plan".to_string(),
             created_at: now.clone(),
             updated_at: now,
         });
@@ -144,7 +188,7 @@ fn save_session_link(folder_path: String, session_id: String, plan_file_name: St
 #[tauri::command]
 fn get_link_by_plan(folder_path: String, plan_file_name: String) -> Result<Option<SessionPlanLink>, String> {
     let store = read_session_links(folder_path)?;
-    Ok(store.links.into_iter().find(|l| l.plan_file_name == plan_file_name))
+    Ok(store.links.into_iter().find(|l| l.plan_file_name == plan_file_name && l.link_type == "plan"))
 }
 
 #[tauri::command]
@@ -163,7 +207,7 @@ fn update_plan_link_filename(folder_path: String, old_name: String, new_name: St
 
     let now = Utc::now().to_rfc3339();
 
-    if let Some(link) = store.links.iter_mut().find(|l| l.plan_file_name == old_name) {
+    if let Some(link) = store.links.iter_mut().find(|l| l.plan_file_name == old_name && l.link_type == "plan") {
         link.plan_file_name = new_name;
         link.updated_at = now;
 
@@ -175,6 +219,49 @@ fn update_plan_link_filename(folder_path: String, old_name: String, new_name: St
     }
 
     Ok(())
+}
+
+#[tauri::command]
+fn save_ralph_link(folder_path: String, session_id: String, prd_file_name: String) -> Result<(), String> {
+    let links_path = get_session_links_path(&folder_path);
+
+    // Load existing store or create new
+    let mut store = if links_path.exists() {
+        let content = fs::read_to_string(&links_path)
+            .map_err(|e| format!("Failed to read session links: {}", e))?;
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        SessionLinksStore { version: 1, links: vec![] }
+    };
+
+    let now = Utc::now().to_rfc3339();
+
+    // Check if link already exists (for ralph_prd)
+    if let Some(existing) = store.links.iter_mut().find(|l| l.plan_file_name == prd_file_name && l.link_type == "ralph_prd") {
+        existing.session_id = session_id;
+        existing.updated_at = now;
+    } else {
+        store.links.push(SessionPlanLink {
+            session_id,
+            plan_file_name: prd_file_name,
+            link_type: "ralph_prd".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        });
+    }
+
+    // Write back
+    let content = serde_json::to_string_pretty(&store)
+        .map_err(|e| format!("Failed to serialize session links: {}", e))?;
+
+    fs::write(&links_path, content)
+        .map_err(|e| format!("Failed to write session links: {}", e))
+}
+
+#[tauri::command]
+fn get_link_by_ralph_prd(folder_path: String, prd_file_name: String) -> Result<Option<SessionPlanLink>, String> {
+    let store = read_session_links(folder_path)?;
+    Ok(store.links.into_iter().find(|l| l.plan_file_name == prd_file_name && l.link_type == "ralph_prd"))
 }
 
 #[tauri::command]
@@ -216,6 +303,10 @@ fn load_session_history(folder_path: String, session_id: String) -> Result<Vec<s
 // Track known plans for detecting new files
 static KNOWN_PLANS: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 
+// Track known ralph PRDs for detecting new files
+static RALPH_PRD_WATCHER: Mutex<Option<RecommendedWatcher>> = Mutex::new(None);
+static KNOWN_RALPH_PRDS: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+
 fn get_plan_files(plans_path: &Path) -> HashSet<String> {
     fs::read_dir(plans_path)
         .map(|entries| {
@@ -224,6 +315,24 @@ fn get_plan_files(plans_path: &Path) -> HashSet<String> {
                 .filter_map(|e| {
                     let p = e.path();
                     if p.is_file() && p.extension().map_or(false, |ext| ext == "md") {
+                        p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn get_ralph_prd_files(ralph_prd_path: &Path) -> HashSet<String> {
+    fs::read_dir(ralph_prd_path)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter_map(|e| {
+                    let p = e.path();
+                    if p.is_file() && p.extension().map_or(false, |ext| ext == "json") {
                         p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
                     } else {
                         None
@@ -334,6 +443,63 @@ fn watch_plans(app: AppHandle, folder_path: String) -> Result<(), String> {
     if let Ok(mut guard) = PLANS_WATCHER.lock() {
         if let Some(ref mut w) = *guard {
             w.watch(&plans_path, RecursiveMode::Recursive)
+                .map_err(|e| format!("Failed to watch directory: {}", e))?;
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn watch_ralph_prds(app: AppHandle, folder_path: String) -> Result<(), String> {
+    let ralph_prd_path = PathBuf::from(&folder_path).join(".trellico").join("ralph-prd");
+
+    // Create ralph-prd directory if it doesn't exist
+    if !ralph_prd_path.exists() {
+        fs::create_dir_all(&ralph_prd_path)
+            .map_err(|e| format!("Failed to create ralph-prd directory: {}", e))?;
+    }
+
+    // Initialize known ralph PRDs
+    if let Ok(mut known) = KNOWN_RALPH_PRDS.lock() {
+        *known = get_ralph_prd_files(&ralph_prd_path);
+    }
+
+    let app_clone = app.clone();
+    let ralph_prd_path_clone = ralph_prd_path.clone();
+    let watcher = RecommendedWatcher::new(
+        move |res: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = res {
+                match event.kind {
+                    EventKind::Create(_)
+                    | EventKind::Modify(_)
+                    | EventKind::Remove(_) => {
+                        let current_files = get_ralph_prd_files(&ralph_prd_path_clone);
+
+                        if let Ok(mut known) = KNOWN_RALPH_PRDS.lock() {
+                            *known = current_files;
+                        }
+
+                        // Emit ralph-prd-changed so the UI refreshes
+                        let _ = app_clone.emit("ralph-prd-changed", ());
+                    }
+                    _ => {}
+                }
+            }
+        },
+        Config::default(),
+    )
+    .map_err(|e| format!("Failed to create watcher: {}", e))?;
+
+    // Store the watcher
+    if let Ok(mut guard) = RALPH_PRD_WATCHER.lock() {
+        *guard = Some(watcher);
+    }
+
+    // Start watching
+    if let Ok(mut guard) = RALPH_PRD_WATCHER.lock() {
+        if let Some(ref mut w) = *guard {
+            w.watch(&ralph_prd_path, RecursiveMode::Recursive)
                 .map_err(|e| format!("Failed to watch directory: {}", e))?;
         }
     }
@@ -497,7 +663,12 @@ pub fn run() {
             save_session_link,
             get_link_by_plan,
             update_plan_link_filename,
-            load_session_history
+            load_session_history,
+            list_ralph_prds,
+            read_ralph_prd,
+            watch_ralph_prds,
+            save_ralph_link,
+            get_link_by_ralph_prd
         ])
         .setup(|app| {
             let main_window = app.get_webview_window("main").unwrap();
