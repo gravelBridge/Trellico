@@ -24,3 +24,10 @@ export interface SessionPlanLink {
   created_at: string;
   updated_at: string;
 }
+
+export interface RalphIteration {
+  iteration_number: number;
+  session_id: string;
+  status: "running" | "completed" | "stopped";
+  created_at: string;
+}

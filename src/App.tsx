@@ -1,8 +1,9 @@
-import { useState } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 
-import { useAutoScroll, useClaudeSession, usePlans, useRalphPrds } from "@/hooks";
+import { useAutoScroll, useClaudeSession, usePlans, useRalphPrds, useRalphIterations } from "@/hooks";
+import { useMessageStore } from "@/contexts";
 import { FolderSelection } from "@/components/FolderSelection";
 import { Sidebar } from "@/components/Sidebar";
 import { EmptyState } from "@/components/EmptyState";
@@ -22,17 +23,20 @@ function App() {
   const [activeTab, setActiveTab] = useState("plans");
   const [splitPosition, setSplitPosition] = useState(50);
 
-  // Claude session hook
-  const {
-    messages,
-    setMessages,
-    sessionId,
-    setSessionId,
-    isRunning,
-    setIsRunning,
-    runClaude,
-    stopClaude,
-  } = useClaudeSession();
+  // Message store
+  const store = useMessageStore();
+  const messages = store.viewedMessages;
+  const isRunning = store.state.isRunning;
+
+  // Store ralph iterations handler in a ref that can be updated
+  const handleClaudeExitRef = React.useRef<((messages: import("@/types").ClaudeMessage[]) => void) | null>(null);
+
+  // Claude session hook - callback uses ref to get latest handler
+  const claudeExitCallback = useCallback((msgs: import("@/types").ClaudeMessage[]) => {
+    handleClaudeExitRef.current?.(msgs);
+  }, []);
+
+  const { runClaude, stopClaude } = useClaudeSession({ onClaudeExit: claudeExitCallback });
 
   // Auto-scroll hook
   const { scrollRef, showScrollbar, handleScroll, resetAutoScroll } = useAutoScroll(messages);
@@ -47,10 +51,6 @@ function App() {
     clearSelection: clearPlanSelection,
   } = usePlans({
     folderPath,
-    isRunning,
-    sessionId,
-    setSessionId,
-    setMessages,
   });
 
   // Ralph PRDs hook
@@ -63,12 +63,43 @@ function App() {
     clearSelection: clearRalphSelection,
   } = useRalphPrds({
     folderPath,
-    isRunning,
-    sessionId,
     activeTab,
-    setSessionId,
-    setMessages,
   });
+
+  // Ralph iterations hook
+  const ralphIterations = useRalphIterations({
+    folderPath,
+    runClaude,
+  });
+
+  // Update the ref with the current handleClaudeExit
+  useEffect(() => {
+    handleClaudeExitRef.current = ralphIterations.handleClaudeExit;
+  }, [ralphIterations.handleClaudeExit]);
+
+  // Handle start ralphing
+  function handleStartRalphing() {
+    if (!selectedRalphPrd) return;
+    ralphIterations.startRalphing(selectedRalphPrd);
+    resetAutoScroll();
+  }
+
+  // Handle stop (combines stopClaude and stopRalphing)
+  function handleStop() {
+    stopClaude();
+    if (ralphIterations.isRalphing) {
+      ralphIterations.stopRalphing();
+    }
+  }
+
+  // Handle select ralph iteration
+  function handleSelectRalphIteration(prdName: string, iterationNumber: number) {
+    // Stop current ralphing if switching to a different PRD or iteration
+    if (ralphIterations.isRalphing && ralphIterations.ralphingPrd !== prdName) {
+      ralphIterations.stopRalphing();
+    }
+    ralphIterations.selectIteration(prdName, iterationNumber);
+  }
 
   // Folder selection
   async function selectFolder() {
@@ -88,20 +119,17 @@ function App() {
     e.preventDefault();
     if (!message.trim() || !folderPath || isRunning) return;
 
-    const isNewSession = !sessionId;
-
-    // Add user message to UI
-    setMessages((prev) => [...prev, { type: "user", content: message }]);
+    const isNewSession = !store.state.viewedSessionId;
 
     resetAutoScroll();
-    setIsRunning(true);
 
     // Only prepend prompt for new sessions in plans tab
     const fullMessage =
       isNewSession && activeTab === "plans" ? `${prdPrompt}\n\n${message}` : message;
 
     try {
-      await runClaude(fullMessage, folderPath, sessionId);
+      // Pass the user's message to display (always show what the user typed)
+      await runClaude(fullMessage, folderPath, store.state.viewedSessionId, message);
     } catch {
       // Error already handled in hook
     }
@@ -110,8 +138,7 @@ function App() {
 
   // Start a new plan session
   function startNewPlan() {
-    setMessages([]);
-    setSessionId(null);
+    store.clearView();
     setMessage("");
     clearPlanSelection();
     clearRalphSelection();
@@ -128,10 +155,6 @@ function App() {
     clearPlanSelection();
     clearRalphSelection();
 
-    // Clear session state
-    setMessages([]);
-    setSessionId(null);
-
     // Switch to Ralph tab
     setActiveTab("ralph");
 
@@ -140,7 +163,6 @@ function App() {
 
     // Start Claude session (no user message shown - the prompt is hidden)
     resetAutoScroll();
-    setIsRunning(true);
 
     runClaude(fullMessage, folderPath, null).catch(() => {
       // Error already handled in hook
@@ -156,6 +178,7 @@ function App() {
   // Handle ralph PRD selection (clear plan selection first)
   function handleSelectRalphPrd(prdName: string) {
     clearPlanSelection();
+    ralphIterations.clearIterationSelection();
     selectRalphPrd(prdName);
   }
 
@@ -182,6 +205,10 @@ function App() {
         folderPath={folderPath}
         onChangeFolder={selectFolder}
         isRunning={isRunning}
+        ralphIterations={ralphIterations.iterations}
+        selectedRalphIteration={ralphIterations.selectedIteration}
+        onSelectRalphIteration={handleSelectRalphIteration}
+        ralphingPrd={ralphIterations.ralphingPrd}
       />
 
       {/* Main content */}
@@ -214,7 +241,7 @@ function App() {
             inputValue={message}
             onInputChange={setMessage}
             onSubmit={handleSubmit}
-            onStop={stopClaude}
+            onStop={handleStop}
             isRunning={isRunning}
             ralphLinkedSessionId={ralphLinkedSessionId}
             sidebarOpen={sidebarOpen}
@@ -222,6 +249,10 @@ function App() {
             ralphPrdContent={ralphPrdContent}
             splitPosition={splitPosition}
             onSplitChange={setSplitPosition}
+            onStartRalphing={handleStartRalphing}
+            isRalphing={ralphIterations.isRalphing}
+            ralphingPrd={ralphIterations.ralphingPrd}
+            isViewingIteration={ralphIterations.selectedIteration !== null}
           />
         ) : messages.length === 0 ? (
           <EmptyState
@@ -249,7 +280,7 @@ function App() {
                   onSubmit={handleSubmit}
                   onStop={stopClaude}
                   isRunning={isRunning}
-                  placeholder={sessionId ? "Follow up..." : "Ask anything..."}
+                  placeholder={store.state.viewedSessionId ? "Follow up..." : "Ask anything..."}
                   rows={3}
                   autoFocus
                 />

@@ -2,45 +2,52 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import type { ClaudeMessage, SessionPlanLink } from "@/types";
+import { useMessageStore } from "@/contexts";
 
 interface UsePlansOptions {
   folderPath: string | null;
-  isRunning: boolean;
-  sessionId: string | null;
-  setSessionId: (id: string | null) => void;
-  setMessages: (messages: ClaudeMessage[] | ((prev: ClaudeMessage[]) => ClaudeMessage[])) => void;
 }
 
-export function usePlans({
-  folderPath,
-  isRunning,
-  sessionId,
-  setSessionId,
-  setMessages,
-}: UsePlansOptions) {
+export function usePlans({ folderPath }: UsePlansOptions) {
+  const store = useMessageStore();
+  const { getLiveSessionIdRef, getIsRunningRef } = store;
+
   const [plans, setPlans] = useState<string[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [planContent, setPlanContent] = useState<string | null>(null);
   const [linkedSessionId, setLinkedSessionId] = useState<string | null>(null);
+  const [pendingLinkPlan, setPendingLinkPlan] = useState<string | null>(null);
 
   const selectedPlanRef = useRef<string | null>(null);
   const prevPlansRef = useRef<string[]>([]);
   const plansDebounceRef = useRef<number | null>(null);
-  const isRunningRef = useRef(isRunning);
-  const sessionIdRef = useRef(sessionId);
+  const selectPlanRef = useRef<((planName: string, autoLoadHistory?: boolean) => Promise<void>) | null>(null);
 
-  // Keep refs in sync with state
-  useEffect(() => {
-    isRunningRef.current = isRunning;
-  }, [isRunning]);
-
-  useEffect(() => {
-    sessionIdRef.current = sessionId;
-  }, [sessionId]);
-
+  // Keep selectedPlanRef in sync (needed for file watcher callback)
   useEffect(() => {
     selectedPlanRef.current = selectedPlan;
   }, [selectedPlan]);
+
+  // Handle pending link when session ID becomes available
+  useEffect(() => {
+    const liveSessionId = store.state.liveSessionId;
+
+    if (pendingLinkPlan && liveSessionId && liveSessionId !== "__pending__" && folderPath) {
+      invoke("save_session_link", {
+        folderPath,
+        sessionId: liveSessionId,
+        planFileName: pendingLinkPlan,
+      })
+        .then(() => {
+          setLinkedSessionId(liveSessionId);
+          setPendingLinkPlan(null);
+        })
+        .catch((err) => {
+          console.error("Failed to save session link:", err);
+          setPendingLinkPlan(null);
+        });
+    }
+  }, [pendingLinkPlan, store.state.liveSessionId, folderPath]);
 
   // Define selectPlan first since handlePlansChange depends on it
   const selectPlan = useCallback(
@@ -68,25 +75,23 @@ export function usePlans({
 
           if (link) {
             setLinkedSessionId(link.session_id);
-            setSessionId(link.session_id);
 
-            // Load chat history
+            // Load chat history and view it
             try {
               const history = await invoke<ClaudeMessage[]>("load_session_history", {
                 folderPath,
                 sessionId: link.session_id,
               });
-              setMessages(history);
+              store.viewSession(link.session_id, history);
             } catch (historyErr) {
               console.error("Failed to load session history:", historyErr);
-              setMessages([]);
+              store.viewSession(null);
             }
           } else {
             setLinkedSessionId(null);
             // Don't clear session if we're in the middle of creating a plan
-            if (!isRunningRef.current) {
-              setSessionId(null);
-              setMessages([]);
+            if (!getIsRunningRef()) {
+              store.viewSession(null);
             }
           }
         } catch (err) {
@@ -95,8 +100,13 @@ export function usePlans({
         }
       }
     },
-    [folderPath, setSessionId, setMessages]
+    [folderPath, store, getIsRunningRef]
   );
+
+  // Keep selectPlanRef in sync (needed for file watcher callback stability)
+  useEffect(() => {
+    selectPlanRef.current = selectPlan;
+  }, [selectPlan]);
 
   // Define reloadSelectedPlan before handlePlansChange
   const reloadSelectedPlan = useCallback(async () => {
@@ -154,25 +164,29 @@ export function usePlans({
 
         // Detect new plan created (while Claude is running = auto-select)
         if (added.length === 1 && removed.length === 0) {
-          // Check if we should auto-select (only when Claude is actively creating a plan)
-          if (isRunningRef.current) {
+          // Use synchronous getter - always returns current value
+          if (getIsRunningRef()) {
             const newPlan = added[0];
-            selectPlan(newPlan, false);
+            selectPlanRef.current?.(newPlan, false);
 
             // Link to current session
-            const currentSessionId = sessionIdRef.current;
-            if (currentSessionId) {
+            const liveSessionId = getLiveSessionIdRef();
+            if (liveSessionId && liveSessionId !== "__pending__") {
+              // Session ID is already available, save link immediately
               invoke("save_session_link", {
                 folderPath,
-                sessionId: currentSessionId,
+                sessionId: liveSessionId,
                 planFileName: newPlan,
               })
                 .then(() => {
-                  setLinkedSessionId(currentSessionId);
+                  setLinkedSessionId(liveSessionId);
                 })
                 .catch((err) => {
                   console.error("Failed to save session link:", err);
                 });
+            } else {
+              // Session ID is still pending, store the plan name for linking later
+              setPendingLinkPlan(newPlan);
             }
           }
           return;
@@ -194,7 +208,7 @@ export function usePlans({
         console.error("Failed to load plans:", err);
       }
     },
-    [folderPath, selectPlan, reloadSelectedPlan]
+    [folderPath, reloadSelectedPlan, getLiveSessionIdRef, getIsRunningRef]
   );
 
   const clearSelection = useCallback(() => {

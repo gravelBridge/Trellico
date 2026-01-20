@@ -2,45 +2,30 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import type { ClaudeMessage, SessionPlanLink } from "@/types";
+import { useMessageStore } from "@/contexts";
 
 interface UseRalphPrdsOptions {
   folderPath: string | null;
-  isRunning: boolean;
-  sessionId: string | null;
   activeTab: string;
-  setSessionId: (id: string | null) => void;
-  setMessages: (messages: ClaudeMessage[] | ((prev: ClaudeMessage[]) => ClaudeMessage[])) => void;
 }
 
-export function useRalphPrds({
-  folderPath,
-  isRunning,
-  sessionId,
-  activeTab,
-  setSessionId,
-  setMessages,
-}: UseRalphPrdsOptions) {
+export function useRalphPrds({ folderPath, activeTab }: UseRalphPrdsOptions) {
+  const store = useMessageStore();
+  const { getLiveSessionIdRef, getIsRunningRef } = store;
+
   const [ralphPrds, setRalphPrds] = useState<string[]>([]);
   const [selectedRalphPrd, setSelectedRalphPrd] = useState<string | null>(null);
   const [ralphPrdContent, setRalphPrdContent] = useState<string | null>(null);
   const [ralphLinkedSessionId, setRalphLinkedSessionId] = useState<string | null>(null);
+  const [pendingLinkPrd, setPendingLinkPrd] = useState<string | null>(null);
 
   const prevRalphPrdsRef = useRef<string[]>([]);
   const ralphPrdsDebounceRef = useRef<number | null>(null);
   const selectedRalphPrdRef = useRef<string | null>(null);
-  const isRunningRef = useRef(isRunning);
-  const sessionIdRef = useRef(sessionId);
   const activeTabRef = useRef(activeTab);
+  const selectRalphPrdRef = useRef<((prdName: string, autoLoadHistory?: boolean) => Promise<void>) | null>(null);
 
-  // Keep refs in sync with state
-  useEffect(() => {
-    isRunningRef.current = isRunning;
-  }, [isRunning]);
-
-  useEffect(() => {
-    sessionIdRef.current = sessionId;
-  }, [sessionId]);
-
+  // Keep refs in sync
   useEffect(() => {
     activeTabRef.current = activeTab;
   }, [activeTab]);
@@ -48,6 +33,27 @@ export function useRalphPrds({
   useEffect(() => {
     selectedRalphPrdRef.current = selectedRalphPrd;
   }, [selectedRalphPrd]);
+
+  // Handle pending link when session ID becomes available
+  useEffect(() => {
+    const liveSessionId = store.state.liveSessionId;
+
+    if (pendingLinkPrd && liveSessionId && liveSessionId !== "__pending__" && folderPath) {
+      invoke("save_ralph_link", {
+        folderPath,
+        sessionId: liveSessionId,
+        prdFileName: pendingLinkPrd,
+      })
+        .then(() => {
+          setRalphLinkedSessionId(liveSessionId);
+          setPendingLinkPrd(null);
+        })
+        .catch((err) => {
+          console.error("Failed to save ralph link:", err);
+          setPendingLinkPrd(null);
+        });
+    }
+  }, [pendingLinkPrd, store.state.liveSessionId, folderPath]);
 
   // Define selectRalphPrd first since handleRalphPrdsChange depends on it
   const selectRalphPrd = useCallback(
@@ -73,7 +79,6 @@ export function useRalphPrds({
           });
           if (link) {
             setRalphLinkedSessionId(link.session_id);
-            setSessionId(link.session_id);
             const history = await invoke<ClaudeMessage[]>("load_session_history", {
               folderPath,
               sessionId: link.session_id,
@@ -81,12 +86,11 @@ export function useRalphPrds({
             // Skip the first user message (the hidden prompt)
             const filteredHistory =
               history.length > 0 && history[0].type === "user" ? history.slice(1) : history;
-            setMessages(filteredHistory);
+            store.viewSession(link.session_id, filteredHistory);
           } else {
             setRalphLinkedSessionId(null);
-            if (!isRunningRef.current) {
-              setSessionId(null);
-              setMessages([]);
+            if (!getIsRunningRef()) {
+              store.viewSession(null);
             }
           }
         } catch (err) {
@@ -94,8 +98,13 @@ export function useRalphPrds({
         }
       }
     },
-    [folderPath, setSessionId, setMessages]
+    [folderPath, store, getIsRunningRef]
   );
+
+  // Keep selectRalphPrdRef in sync (needed for file watcher callback stability)
+  useEffect(() => {
+    selectRalphPrdRef.current = selectRalphPrd;
+  }, [selectRalphPrd]);
 
   // Handle ralph PRDs list changes
   const handleRalphPrdsChange = useCallback(
@@ -117,22 +126,26 @@ export function useRalphPrds({
         if (
           added.length === 1 &&
           removed.length === 0 &&
-          isRunningRef.current &&
+          getIsRunningRef() &&
           activeTabRef.current === "ralph"
         ) {
-          selectRalphPrd(added[0], false);
+          selectRalphPrdRef.current?.(added[0], false);
           // Link session to this PRD
-          const currentSessionId = sessionIdRef.current;
-          if (currentSessionId) {
+          const liveSessionId = getLiveSessionIdRef();
+          if (liveSessionId && liveSessionId !== "__pending__") {
+            // Session ID is already available, save link immediately
             invoke("save_ralph_link", {
               folderPath,
-              sessionId: currentSessionId,
+              sessionId: liveSessionId,
               prdFileName: added[0],
             })
               .then(() => {
-                setRalphLinkedSessionId(currentSessionId);
+                setRalphLinkedSessionId(liveSessionId);
               })
               .catch(console.error);
+          } else {
+            // Session ID is still pending, store the PRD name for linking later
+            setPendingLinkPrd(added[0]);
           }
         }
 
@@ -146,7 +159,7 @@ export function useRalphPrds({
         console.error("Failed to load ralph prds:", err);
       }
     },
-    [folderPath, selectRalphPrd]
+    [folderPath, getLiveSessionIdRef, getIsRunningRef]
   );
 
   const clearSelection = useCallback(() => {
@@ -155,6 +168,22 @@ export function useRalphPrds({
     setRalphLinkedSessionId(null);
     selectedRalphPrdRef.current = null;
   }, []);
+
+  // Reload the content of the currently selected PRD
+  const reloadSelectedPrdContent = useCallback(async () => {
+    const prdName = selectedRalphPrdRef.current;
+    if (!folderPath || !prdName) return;
+
+    try {
+      const content = await invoke<string>("read_ralph_prd", { folderPath, prdName });
+      setRalphPrdContent(content);
+    } catch (err) {
+      console.error("Failed to reload ralph prd content:", err);
+    }
+  }, [folderPath]);
+
+  // Debounce ref for content reload
+  const contentReloadDebounceRef = useRef<number | null>(null);
 
   // Watch for ralph PRD changes
   useEffect(() => {
@@ -179,6 +208,14 @@ export function useRalphPrds({
       ralphPrdsDebounceRef.current = window.setTimeout(() => {
         handleRalphPrdsChange(false);
       }, 100);
+
+      // Also reload the selected PRD content if one is selected
+      if (contentReloadDebounceRef.current) {
+        clearTimeout(contentReloadDebounceRef.current);
+      }
+      contentReloadDebounceRef.current = window.setTimeout(() => {
+        reloadSelectedPrdContent();
+      }, 150);
     }).then((fn) => {
       unlisten = fn;
     });
@@ -186,8 +223,9 @@ export function useRalphPrds({
     return () => {
       if (unlisten) unlisten();
       if (ralphPrdsDebounceRef.current) clearTimeout(ralphPrdsDebounceRef.current);
+      if (contentReloadDebounceRef.current) clearTimeout(contentReloadDebounceRef.current);
     };
-  }, [folderPath, handleRalphPrdsChange]);
+  }, [folderPath, handleRalphPrdsChange, reloadSelectedPrdContent]);
 
   return {
     ralphPrds,

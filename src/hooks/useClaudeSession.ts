@@ -1,14 +1,25 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import type { ClaudeMessage } from "@/types";
+import { useMessageStore } from "@/contexts";
 
-export function useClaudeSession() {
-  const [messages, setMessages] = useState<ClaudeMessage[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [isRunning, setIsRunning] = useState(false);
+interface UseClaudeSessionOptions {
+  onClaudeExit?: (messages: ClaudeMessage[]) => void;
+}
+
+export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
+  const { onClaudeExit } = options;
+  const store = useMessageStore();
   const bufferRef = useRef("");
+  const onClaudeExitRef = useRef(onClaudeExit);
 
+  // Keep the callback ref up to date
+  useEffect(() => {
+    onClaudeExitRef.current = onClaudeExit;
+  }, [onClaudeExit]);
+
+  // Set up event listeners
   useEffect(() => {
     let unlisteners: UnlistenFn[] = [];
     let mounted = true;
@@ -26,11 +37,11 @@ export function useClaudeSession() {
           if (!trimmed) continue;
           try {
             const parsed = JSON.parse(trimmed) as ClaudeMessage;
-            // Extract session ID from init message
+            // Extract session ID from init message and update the store
             if (parsed.type === "system" && parsed.subtype === "init" && parsed.session_id) {
-              setSessionId(parsed.session_id);
+              store.setLiveSessionId(parsed.session_id);
             }
-            setMessages((prev) => [...prev, parsed]);
+            store.addMessage(parsed);
           } catch {
             // Not valid JSON, ignore
           }
@@ -39,14 +50,18 @@ export function useClaudeSession() {
 
       const exitUnlisten = await listen<number>("claude-exit", () => {
         if (mounted) {
-          setIsRunning(false);
+          // Call the exit callback with current live messages
+          if (onClaudeExitRef.current) {
+            onClaudeExitRef.current(store.getLiveMessagesRef());
+          }
+          store.endLiveSession();
         }
       });
 
       const errorUnlisten = await listen<string>("claude-error", (event) => {
         if (mounted) {
-          setMessages((prev) => [...prev, { type: "system", content: `Error: ${event.payload}` }]);
-          setIsRunning(false);
+          store.addMessage({ type: "system", content: `Error: ${event.payload}` });
+          store.endLiveSession();
         }
       });
 
@@ -59,45 +74,51 @@ export function useClaudeSession() {
       mounted = false;
       unlisteners.forEach((unlisten) => unlisten());
     };
-  }, []);
+  }, [store]);
 
   const runClaude = useCallback(
-    async (message: string, folderPath: string, currentSessionId: string | null) => {
+    async (
+      message: string,
+      folderPath: string,
+      sessionId: string | null,
+      userMessageToShow?: string
+    ) => {
       bufferRef.current = "";
-      setIsRunning(true);
+      // If resuming an existing session, pass its ID to keep messages
+      store.startLiveSession(sessionId ?? undefined);
+
+      // Add the user message to display after starting the session
+      if (userMessageToShow) {
+        store.addMessage({ type: "user", content: userMessageToShow });
+      }
 
       try {
         await invoke("run_claude", {
           message,
           folderPath,
-          sessionId: currentSessionId,
+          sessionId,
         });
       } catch (err) {
-        setMessages((prev) => [...prev, { type: "system", content: `Error: ${err}` }]);
-        setIsRunning(false);
+        store.addMessage({ type: "system", content: `Error: ${err}` });
+        store.endLiveSession();
         throw err;
       }
     },
-    []
+    [store]
   );
 
   const stopClaude = useCallback(async () => {
     try {
       await invoke("stop_claude");
-      setIsRunning(false);
+      store.setRunning(false);
     } catch (err) {
       console.error("Failed to stop Claude:", err);
     }
-  }, []);
+  }, [store]);
 
   return {
-    messages,
-    setMessages,
-    sessionId,
-    setSessionId,
-    isRunning,
-    setIsRunning,
     runClaude,
     stopClaude,
+    isRunning: store.state.isRunning,
   };
 }

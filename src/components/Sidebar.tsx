@@ -1,7 +1,9 @@
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { kebabToTitle } from "@/lib/formatting";
+import type { RalphIteration } from "@/types";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -18,6 +20,10 @@ interface SidebarProps {
   folderPath: string;
   onChangeFolder: () => void;
   isRunning: boolean;
+  ralphIterations: Record<string, RalphIteration[]>;
+  selectedRalphIteration: { prd: string; iteration: number } | null;
+  onSelectRalphIteration: (prd: string, iteration: number) => void;
+  ralphingPrd: string | null;
 }
 
 function SidebarToggleIcon() {
@@ -38,6 +44,40 @@ function SidebarToggleIcon() {
   );
 }
 
+function ChevronIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={cn(
+        "transition-transform shrink-0",
+        expanded ? "rotate-90" : "rotate-0"
+      )}
+    >
+      <path d="M9 18l6-6-6-6" />
+    </svg>
+  );
+}
+
+function StatusDot({ status }: { status: string }) {
+  return (
+    <span
+      className={cn(
+        "w-1.5 h-1.5 rounded-full shrink-0",
+        status === "running" && "bg-yellow-500 animate-pulse",
+        status === "completed" && "bg-green-500",
+        status === "stopped" && "bg-red-500"
+      )}
+    />
+  );
+}
+
 export function Sidebar({
   isOpen,
   onToggle,
@@ -53,7 +93,38 @@ export function Sidebar({
   folderPath,
   onChangeFolder,
   isRunning,
+  ralphIterations,
+  selectedRalphIteration,
+  onSelectRalphIteration,
+  ralphingPrd,
 }: SidebarProps) {
+  const [expandedPrds, setExpandedPrds] = useState<Set<string>>(new Set());
+
+  // Auto-expand PRD when ralphing starts (permanently)
+  useEffect(() => {
+    if (ralphingPrd && !expandedPrds.has(ralphingPrd)) {
+      queueMicrotask(() => {
+        setExpandedPrds((prev) => {
+          const next = new Set(prev);
+          next.add(ralphingPrd);
+          return next;
+        });
+      });
+    }
+  }, [ralphingPrd, expandedPrds]);
+
+  const togglePrdExpand = (prd: string) => {
+    setExpandedPrds((prev) => {
+      const next = new Set(prev);
+      if (next.has(prd)) {
+        next.delete(prd);
+      } else {
+        next.add(prd);
+      }
+      return next;
+    });
+  };
+
   return (
     <>
       {/* Sidebar */}
@@ -134,20 +205,63 @@ export function Sidebar({
               <TabsContent value="ralph" className="mt-0">
                 {ralphPrds.length > 0 ? (
                   <div className="mt-2 space-y-0.5">
-                    {ralphPrds.map((prd) => (
-                      <button
-                        key={prd}
-                        onClick={() => onSelectRalphPrd(prd)}
-                        className={cn(
-                          "w-full text-left px-2 py-1.5 text-sm rounded-md transition-colors truncate",
-                          selectedRalphPrd === prd
-                            ? "bg-muted text-foreground"
-                            : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                        )}
-                      >
-                        {kebabToTitle(prd)}
-                      </button>
-                    ))}
+                    {ralphPrds.map((prd) => {
+                      const iterations = ralphIterations[prd] || [];
+                      const hasIterations = iterations.length > 0;
+                      const isExpanded = expandedPrds.has(prd);
+                      const isPrdSelected = selectedRalphPrd === prd && !selectedRalphIteration;
+
+                      return (
+                        <div key={prd}>
+                          <div className="flex items-center gap-1">
+                            {hasIterations && (
+                              <button
+                                onClick={() => togglePrdExpand(prd)}
+                                className="p-1 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground"
+                              >
+                                <ChevronIcon expanded={isExpanded} />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => onSelectRalphPrd(prd)}
+                              className={cn(
+                                "flex-1 text-left py-1.5 text-sm rounded-md transition-colors truncate",
+                                hasIterations ? "px-1" : "px-2",
+                                isPrdSelected
+                                  ? "bg-muted text-foreground"
+                                  : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                              )}
+                            >
+                              {kebabToTitle(prd)}
+                            </button>
+                          </div>
+                          {hasIterations && isExpanded && (
+                            <div className="ml-6 space-y-0.5 mt-0.5">
+                              {iterations.map((iter) => {
+                                const isIterSelected =
+                                  selectedRalphIteration?.prd === prd &&
+                                  selectedRalphIteration?.iteration === iter.iteration_number;
+                                return (
+                                  <button
+                                    key={iter.iteration_number}
+                                    onClick={() => onSelectRalphIteration(prd, iter.iteration_number)}
+                                    className={cn(
+                                      "w-full text-left px-2 py-1 text-xs rounded-md transition-colors flex items-center gap-2",
+                                      isIterSelected
+                                        ? "bg-muted text-foreground"
+                                        : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                    )}
+                                  >
+                                    <StatusDot status={iter.status} />
+                                    <span>Iteration {iter.iteration_number}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground px-1 mt-2">No Ralph PRDs yet</p>

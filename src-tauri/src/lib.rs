@@ -15,6 +15,7 @@ static PROCESS_RUNNING: AtomicBool = AtomicBool::new(false);
 static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static MASTER_PTY: Mutex<Option<Box<dyn MasterPty + Send>>> = Mutex::new(None);
 static PLANS_WATCHER: Mutex<Option<RecommendedWatcher>> = Mutex::new(None);
+static RALPH_ITERATIONS_WATCHER: Mutex<Option<RecommendedWatcher>> = Mutex::new(None);
 
 // Session-Plan linking types
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -35,6 +36,21 @@ fn default_link_type() -> String {
 struct SessionLinksStore {
     version: u32,
     links: Vec<SessionPlanLink>,
+}
+
+// Ralph iteration types
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+struct RalphIteration {
+    iteration_number: u32,
+    session_id: String,
+    status: String,  // "running" | "completed" | "stopped"
+    created_at: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct RalphIterationsStore {
+    version: u32,
+    iterations: std::collections::HashMap<String, Vec<RalphIteration>>,  // PRD name -> iterations
 }
 
 // Plan change event type
@@ -265,6 +281,126 @@ fn save_ralph_link(folder_path: String, session_id: String, prd_file_name: Strin
 fn get_link_by_ralph_prd(folder_path: String, prd_file_name: String) -> Result<Option<SessionPlanLink>, String> {
     let store = read_session_links(folder_path)?;
     Ok(store.links.into_iter().find(|l| l.plan_file_name == prd_file_name && l.link_type == "ralph_prd"))
+}
+
+fn get_ralph_iterations_path(folder_path: &str) -> PathBuf {
+    Path::new(folder_path).join(".trellico").join("ralph-iterations.json")
+}
+
+#[tauri::command]
+fn get_ralph_iterations(folder_path: String, prd_name: String) -> Result<Vec<RalphIteration>, String> {
+    let iterations_path = get_ralph_iterations_path(&folder_path);
+
+    if !iterations_path.exists() {
+        return Ok(vec![]);
+    }
+
+    let content = fs::read_to_string(&iterations_path)
+        .map_err(|e| format!("Failed to read ralph iterations: {}", e))?;
+
+    let store: RalphIterationsStore = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse ralph iterations: {}", e))?;
+
+    Ok(store.iterations.get(&prd_name).cloned().unwrap_or_default())
+}
+
+#[tauri::command]
+fn get_all_ralph_iterations(folder_path: String) -> Result<std::collections::HashMap<String, Vec<RalphIteration>>, String> {
+    let iterations_path = get_ralph_iterations_path(&folder_path);
+
+    if !iterations_path.exists() {
+        return Ok(std::collections::HashMap::new());
+    }
+
+    let content = fs::read_to_string(&iterations_path)
+        .map_err(|e| format!("Failed to read ralph iterations: {}", e))?;
+
+    let store: RalphIterationsStore = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse ralph iterations: {}", e))?;
+
+    Ok(store.iterations)
+}
+
+#[tauri::command]
+fn save_ralph_iteration(folder_path: String, prd_name: String, iteration: RalphIteration) -> Result<(), String> {
+    let iterations_path = get_ralph_iterations_path(&folder_path);
+
+    // Load existing store or create new
+    let mut store = if iterations_path.exists() {
+        let content = fs::read_to_string(&iterations_path)
+            .map_err(|e| format!("Failed to read ralph iterations: {}", e))?;
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        RalphIterationsStore { version: 1, iterations: std::collections::HashMap::new() }
+    };
+
+    // Add iteration to the PRD's list
+    store.iterations.entry(prd_name).or_insert_with(Vec::new).push(iteration);
+
+    // Write back
+    let content = serde_json::to_string_pretty(&store)
+        .map_err(|e| format!("Failed to serialize ralph iterations: {}", e))?;
+
+    fs::write(&iterations_path, content)
+        .map_err(|e| format!("Failed to write ralph iterations: {}", e))
+}
+
+#[tauri::command]
+fn update_ralph_iteration_status(folder_path: String, prd_name: String, iteration_number: u32, status: String) -> Result<(), String> {
+    let iterations_path = get_ralph_iterations_path(&folder_path);
+
+    if !iterations_path.exists() {
+        return Err("Iterations file does not exist".to_string());
+    }
+
+    let content = fs::read_to_string(&iterations_path)
+        .map_err(|e| format!("Failed to read ralph iterations: {}", e))?;
+
+    let mut store: RalphIterationsStore = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse ralph iterations: {}", e))?;
+
+    // Find and update the iteration
+    if let Some(iterations) = store.iterations.get_mut(&prd_name) {
+        if let Some(iter) = iterations.iter_mut().find(|i| i.iteration_number == iteration_number) {
+            iter.status = status;
+        }
+    }
+
+    // Write back
+    let content = serde_json::to_string_pretty(&store)
+        .map_err(|e| format!("Failed to serialize ralph iterations: {}", e))?;
+
+    fs::write(&iterations_path, content)
+        .map_err(|e| format!("Failed to write ralph iterations: {}", e))
+}
+
+#[tauri::command]
+fn update_ralph_iteration_session_id(folder_path: String, prd_name: String, iteration_number: u32, session_id: String) -> Result<(), String> {
+    let iterations_path = get_ralph_iterations_path(&folder_path);
+
+    if !iterations_path.exists() {
+        return Err("Iterations file does not exist".to_string());
+    }
+
+    let content = fs::read_to_string(&iterations_path)
+        .map_err(|e| format!("Failed to read ralph iterations: {}", e))?;
+
+    let mut store: RalphIterationsStore = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse ralph iterations: {}", e))?;
+
+    // Find and update the iteration
+    if let Some(iterations) = store.iterations.get_mut(&prd_name) {
+        if let Some(iter) = iterations.iter_mut().find(|i| i.iteration_number == iteration_number) {
+            iter.session_id = session_id;
+        }
+    }
+
+    // Write back
+    let content = serde_json::to_string_pretty(&store)
+        .map_err(|e| format!("Failed to serialize ralph iterations: {}", e))?;
+
+    fs::write(&iterations_path, content)
+        .map_err(|e| format!("Failed to write ralph iterations: {}", e))
 }
 
 #[tauri::command]
@@ -512,6 +648,59 @@ fn watch_ralph_prds(app: AppHandle, folder_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn watch_ralph_iterations(app: AppHandle, folder_path: String) -> Result<(), String> {
+    let iterations_path = get_ralph_iterations_path(&folder_path);
+    let trellico_path = PathBuf::from(&folder_path).join(".trellico");
+
+    // Create .trellico directory if it doesn't exist
+    if !trellico_path.exists() {
+        fs::create_dir_all(&trellico_path)
+            .map_err(|e| format!("Failed to create .trellico directory: {}", e))?;
+    }
+
+    let app_clone = app.clone();
+    let iterations_path_clone = iterations_path.clone();
+    let watcher = RecommendedWatcher::new(
+        move |res: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = res {
+                // Only react to changes to the iterations file
+                let is_iterations_file = event.paths.iter().any(|p| p == &iterations_path_clone);
+                if !is_iterations_file {
+                    return;
+                }
+
+                match event.kind {
+                    EventKind::Create(_)
+                    | EventKind::Modify(_)
+                    | EventKind::Remove(_) => {
+                        // Emit ralph-iterations-changed so the UI refreshes
+                        let _ = app_clone.emit("ralph-iterations-changed", ());
+                    }
+                    _ => {}
+                }
+            }
+        },
+        Config::default(),
+    )
+    .map_err(|e| format!("Failed to create watcher: {}", e))?;
+
+    // Store the watcher
+    if let Ok(mut guard) = RALPH_ITERATIONS_WATCHER.lock() {
+        *guard = Some(watcher);
+    }
+
+    // Start watching the .trellico directory (since the file might not exist yet)
+    if let Ok(mut guard) = RALPH_ITERATIONS_WATCHER.lock() {
+        if let Some(ref mut w) = *guard {
+            w.watch(&trellico_path, RecursiveMode::NonRecursive)
+                .map_err(|e| format!("Failed to watch directory: {}", e))?;
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 async fn run_claude(
     app: AppHandle,
     message: String,
@@ -672,7 +861,13 @@ pub fn run() {
             read_ralph_prd,
             watch_ralph_prds,
             save_ralph_link,
-            get_link_by_ralph_prd
+            get_link_by_ralph_prd,
+            get_ralph_iterations,
+            get_all_ralph_iterations,
+            save_ralph_iteration,
+            update_ralph_iteration_status,
+            update_ralph_iteration_session_id,
+            watch_ralph_iterations
         ])
         .setup(|app| {
             let main_window = app.get_webview_window("main").unwrap();
