@@ -238,18 +238,31 @@ export function useRalphIterations({
 
       setSelectedIteration({ prd: prdName, iteration: iterationNumber });
 
-      // Find the iteration to get its session_id
+      // Find the iteration
       const prdIterations = iterations[prdName] || [];
       const iteration = prdIterations.find((i) => i.iteration_number === iterationNumber);
 
-      if (iteration && iteration.session_id) {
-        // Load the session history and view it
+      if (!iteration) return;
+
+      // Check if this is the currently running iteration
+      const isCurrentRunningIteration =
+        isRalphingRef.current &&
+        ralphingPrdRef.current === prdName &&
+        currentIterationRef.current === iterationNumber;
+
+      if (isCurrentRunningIteration) {
+        // Switch to viewing the live session (session_id may not be persisted yet)
+        const liveSessionId = store.getLiveSessionIdRef();
+        if (liveSessionId) {
+          store.viewSession(liveSessionId);
+        }
+      } else if (iteration.session_id) {
+        // Load historical session
         try {
           const history = await invoke<ClaudeMessage[]>("load_session_history", {
             folderPath,
             sessionId: iteration.session_id,
           });
-          // Use the store to view this session with its messages
           store.viewSession(iteration.session_id, history);
         } catch (err) {
           console.error("Failed to load session history:", err);

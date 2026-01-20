@@ -253,6 +253,7 @@ function App() {
             isRalphing={ralphIterations.isRalphing}
             ralphingPrd={ralphIterations.ralphingPrd}
             isViewingIteration={ralphIterations.selectedIteration !== null}
+            iterations={ralphIterations.iterations[selectedRalphPrd] || []}
           />
         ) : messages.length === 0 ? (
           <EmptyState

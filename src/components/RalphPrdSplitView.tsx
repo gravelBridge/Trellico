@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import type { ClaudeMessage } from "@/types";
+import type { ClaudeMessage, RalphIteration } from "@/types";
 import { SplitView } from "./SplitView";
 import { ChatPanel } from "./ChatPanel";
 import { ContentPanel } from "./ContentPanel";
@@ -25,6 +25,7 @@ interface RalphPrdSplitViewProps {
   isRalphing: boolean;
   ralphingPrd: string | null;
   isViewingIteration: boolean;
+  iterations: RalphIteration[];
 }
 
 export function RalphPrdSplitView({
@@ -47,14 +48,20 @@ export function RalphPrdSplitView({
   isRalphing,
   ralphingPrd,
   isViewingIteration,
+  iterations,
 }: RalphPrdSplitViewProps) {
   // Right panel needs padding when sidebar is closed AND left panel is nearly collapsed
   const leftPanelCollapsed = splitPosition < 6;
   const rightPanelNeedsPadding = !sidebarOpen && leftPanelCollapsed;
 
-  // Determine if button should be disabled - when running or when ralphing on this PRD
+  // Check if ralphing is completed (last iteration is "completed" and not currently ralphing)
+  const lastIteration = iterations[iterations.length - 1];
+  const isRalphingCompleted =
+    !isRalphing && lastIteration?.status === "completed";
+
+  // Determine if button should be disabled - when running, ralphing, or already completed
   const isRalphingThisPrd = isRalphing && ralphingPrd === selectedRalphPrd;
-  const buttonDisabled = isRunning || isRalphingThisPrd;
+  const buttonDisabled = isRunning || isRalphingThisPrd || isRalphingCompleted;
 
   return (
     <SplitView
@@ -87,7 +94,11 @@ export function RalphPrdSplitView({
                 onClick={onStartRalphing}
                 disabled={buttonDisabled}
               >
-                {isRalphingThisPrd ? "Ralphing..." : "Start Ralphing!"}
+                {isRalphingThisPrd
+                  ? "Ralphing..."
+                  : isRalphingCompleted
+                    ? "Completed"
+                    : "Start Ralphing!"}
               </Button>
             ) : undefined
           }
