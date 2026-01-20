@@ -2,33 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import Markdown from "react-markdown";
-import { Light as SyntaxHighlighter } from "react-syntax-highlighter";
-import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs";
-import typescript from "react-syntax-highlighter/dist/esm/languages/hljs/typescript";
-import javascript from "react-syntax-highlighter/dist/esm/languages/hljs/javascript";
-import python from "react-syntax-highlighter/dist/esm/languages/hljs/python";
-import bash from "react-syntax-highlighter/dist/esm/languages/hljs/bash";
-import json from "react-syntax-highlighter/dist/esm/languages/hljs/json";
-import css from "react-syntax-highlighter/dist/esm/languages/hljs/css";
-import rust from "react-syntax-highlighter/dist/esm/languages/hljs/rust";
+import { Streamdown } from "streamdown";
+import { code } from "@streamdown/code";
 import { SplitView } from "@/components/SplitView";
-
-SyntaxHighlighter.registerLanguage("typescript", typescript);
-SyntaxHighlighter.registerLanguage("ts", typescript);
-SyntaxHighlighter.registerLanguage("tsx", typescript);
-SyntaxHighlighter.registerLanguage("javascript", javascript);
-SyntaxHighlighter.registerLanguage("js", javascript);
-SyntaxHighlighter.registerLanguage("jsx", javascript);
-SyntaxHighlighter.registerLanguage("python", python);
-SyntaxHighlighter.registerLanguage("py", python);
-SyntaxHighlighter.registerLanguage("bash", bash);
-SyntaxHighlighter.registerLanguage("sh", bash);
-SyntaxHighlighter.registerLanguage("shell", bash);
-SyntaxHighlighter.registerLanguage("json", json);
-SyntaxHighlighter.registerLanguage("css", css);
-SyntaxHighlighter.registerLanguage("rust", rust);
-SyntaxHighlighter.registerLanguage("rs", rust);
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -676,33 +652,12 @@ function App() {
         return (
           <div key={index} className="space-y-1">
             {textContent && (
-              <div className="prose prose-neutral prose-sm prose-pre:p-0 [&>*:last-child]:!mb-0 prose-p:inline prose-li:inline max-w-none select-text">
-                <Markdown
-                  components={{
-                    code({ className, children, ...props }) {
-                      const match = /language-(\w+)/.exec(className || "");
-                      const inline = !match;
-                      return !inline ? (
-                        <SyntaxHighlighter
-                          style={atomOneDark}
-                          language={match[1]}
-                          PreTag="div"
-                          customStyle={{ margin: 0, borderRadius: "0.375rem", fontSize: "0.8125rem" }}
-                          wrapLongLines={true}
-                        >
-                          {String(children).replace(/\n$/, "")}
-                        </SyntaxHighlighter>
-                      ) : (
-                        <code className={className} {...props}>
-                          {children}
-                        </code>
-                      );
-                    },
-                  }}
-                >
-                  {textContent}
-                </Markdown>
-              </div>
+              <Streamdown
+                className="prose prose-neutral prose-sm max-w-none select-text [&>*:last-child]:mb-0"
+                plugins={{ code }}
+              >
+                {textContent}
+              </Streamdown>
             )}
             {toolUses?.map((tool, i) => {
               const inputJson = tool.input ? JSON.stringify(tool.input) : "";
@@ -770,7 +725,7 @@ function App() {
           return null;
         }
         return (
-          <div key={index} className="text-sm text-muted-foreground select-text">
+          <div key={index} className="text-sm bg-primary/10 rounded-lg px-3 py-2 select-text">
             {displayContent}
           </div>
         );
@@ -1060,34 +1015,13 @@ function App() {
                     Create Ralph Session
                   </Button>
                 </div>
-                <div className="flex-1 overflow-auto">
-                  <div className="px-4 py-4 prose prose-neutral prose-sm prose-pre:p-0 [&>*:last-child]:!mb-0 max-w-none select-text">
-                    <Markdown
-                      components={{
-                        code({ className, children, ...props }) {
-                          const match = /language-(\w+)/.exec(className || "");
-                          const inline = !match;
-                          return !inline ? (
-                            <SyntaxHighlighter
-                              style={atomOneDark}
-                              language={match[1]}
-                              PreTag="div"
-                              customStyle={{ margin: 0, borderRadius: "0.375rem", fontSize: "0.8125rem" }}
-                              wrapLongLines={true}
-                            >
-                              {String(children).replace(/\n$/, "")}
-                            </SyntaxHighlighter>
-                          ) : (
-                            <code className={className} {...props}>
-                              {children}
-                            </code>
-                          );
-                        },
-                      }}
-                    >
-                      {planContent}
-                    </Markdown>
-                  </div>
+                <div className="flex-1 overflow-auto px-4 py-4">
+                  <Streamdown
+                    className="prose prose-neutral prose-sm max-w-none select-text"
+                    plugins={{ code }}
+                  >
+                    {planContent}
+                  </Streamdown>
                 </div>
               </div>
             }
