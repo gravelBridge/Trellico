@@ -1,17 +1,6 @@
-import React, { createContext, useContext, useCallback, useState, useSyncExternalStore } from "react";
+import React, { useCallback, useState, useSyncExternalStore } from "react";
 import type { ClaudeMessage } from "@/types";
-
-// State shape
-interface MessageStoreState {
-  // Messages stored per session ID (empty string = unsaved session)
-  sessions: Record<string, ClaudeMessage[]>;
-  // The session currently receiving Claude output
-  liveSessionId: string | null;
-  // The session being displayed in UI
-  viewedSessionId: string | null;
-  // Whether Claude is currently running
-  isRunning: boolean;
-}
+import { MessageStoreContext, type MessageStoreState, type MessageStoreContextValue } from "./MessageStoreContext";
 
 // Action types
 type MessageAction =
@@ -163,33 +152,6 @@ function createStore() {
   };
 }
 
-// Context value type
-interface MessageStoreContextValue {
-  state: MessageStoreState;
-  // Get messages for the currently viewed session
-  viewedMessages: ClaudeMessage[];
-  // Check if we're viewing the live session
-  isViewingLiveSession: boolean;
-  // Actions
-  startLiveSession: (resumeSessionId?: string) => void;
-  setLiveSessionId: (sessionId: string) => void;
-  endLiveSession: () => void;
-  addMessage: (message: ClaudeMessage) => void;
-  viewSession: (sessionId: string | null, messages?: ClaudeMessage[]) => void;
-  loadSessionHistory: (sessionId: string, messages: ClaudeMessage[]) => void;
-  clearView: () => void;
-  setRunning: (isRunning: boolean) => void;
-  // Get current state synchronously (always up-to-date, even before React re-renders)
-  getStateRef: () => MessageStoreState;
-  // Convenience getters
-  getViewedMessagesRef: () => ClaudeMessage[];
-  getLiveMessagesRef: () => ClaudeMessage[];
-  getLiveSessionIdRef: () => string | null;
-  getIsRunningRef: () => boolean;
-}
-
-const MessageStoreContext = createContext<MessageStoreContextValue | null>(null);
-
 export function MessageStoreProvider({ children }: { children: React.ReactNode }) {
   // Create store once using useState initializer (lint-approved lazy initialization)
   const [store] = useState(createStore);
@@ -295,12 +257,4 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
   };
 
   return <MessageStoreContext.Provider value={value}>{children}</MessageStoreContext.Provider>;
-}
-
-export function useMessageStore() {
-  const context = useContext(MessageStoreContext);
-  if (!context) {
-    throw new Error("useMessageStore must be used within a MessageStoreProvider");
-  }
-  return context;
 }

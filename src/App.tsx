@@ -242,7 +242,14 @@ function App() {
             onInputChange={setMessage}
             onSubmit={handleSubmit}
             onStop={handleStop}
-            isRunning={isRunning}
+            isRunning={isRunning && (() => {
+              // Only show running state if viewing the currently running iteration (or no iteration selected)
+              const selected = ralphIterations.selectedIteration;
+              if (!selected) return true;
+              const iters = ralphIterations.iterations[selected.prd] || [];
+              const iter = iters.find(i => i.iteration_number === selected.iteration);
+              return iter?.status === "running";
+            })()}
             ralphLinkedSessionId={ralphLinkedSessionId}
             sidebarOpen={sidebarOpen}
             selectedRalphPrd={selectedRalphPrd}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
@@ -99,18 +99,17 @@ export function Sidebar({
   ralphingPrd,
 }: SidebarProps) {
   const [expandedPrds, setExpandedPrds] = useState<Set<string>>(new Set());
+  const [prevRalphingPrd, setPrevRalphingPrd] = useState<string | null>(null);
 
-  // Auto-expand PRD when ralphing starts
-  useEffect(() => {
-    if (ralphingPrd) {
-      setExpandedPrds((prev) => {
-        if (prev.has(ralphingPrd)) return prev;
-        const next = new Set(prev);
-        next.add(ralphingPrd);
-        return next;
-      });
+  // Auto-expand PRD when ralphing starts (React pattern for syncing with props)
+  if (ralphingPrd !== prevRalphingPrd) {
+    setPrevRalphingPrd(ralphingPrd);
+    if (ralphingPrd && !expandedPrds.has(ralphingPrd)) {
+      const next = new Set(expandedPrds);
+      next.add(ralphingPrd);
+      setExpandedPrds(next);
     }
-  }, [ralphingPrd]);
+  }
 
   const togglePrdExpand = (prd: string) => {
     setExpandedPrds((prev) => {
