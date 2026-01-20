@@ -1,6 +1,7 @@
 import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import { cn } from "@/lib/utils";
+import { JsonViewer } from "./JsonViewer";
 
 interface ContentPanelProps {
   title: string;
@@ -40,9 +41,7 @@ export function ContentPanel({
             </Streamdown>
           </div>
         ) : (
-          <pre className="px-4 py-4 text-sm font-mono whitespace-pre-wrap select-text">
-            {content}
-          </pre>
+          <JsonViewer content={content} />
         )}
       </div>
     </div>
