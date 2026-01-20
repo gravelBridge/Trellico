@@ -231,4 +231,6 @@ Before writing [prd-file-name].json, verify:
 - [ ] Every story has "Typecheck passes" as criterion
 - [ ] UI stories have "Verify in browser using agent-browser skill" as criterion
 - [ ] Acceptance criteria are verifiable (not vague)
-- [ ] No story depends on a later story`;
+- [ ] No story depends on a later story
+
+The PRD to convert is below:`;
