@@ -1,0 +1,30 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Transparent canvas with centered, scaled content -->
+
+  <!-- Scaled down version (0.8x) centered with 51px padding -->
+  <g transform="translate(51.2, 51.2) scale(0.8)">
+    <!-- Background -->
+    <rect width="512" height="512" rx="96" fill="#0a0a0a"/>
+
+    <!-- Abstract loop mark -->
+    <g fill="#ffffff">
+      <!-- Top horizontal bar -->
+      <rect x="112" y="128" width="200" height="56"/>
+
+      <!-- Right vertical bar -->
+      <rect x="344" y="128" width="56" height="200"/>
+
+      <!-- Bottom horizontal bar -->
+      <rect x="200" y="328" width="200" height="56"/>
+
+      <!-- Left vertical bar -->
+      <rect x="112" y="184" width="56" height="200"/>
+    </g>
+
+    <!-- Inner cutout -->
+    <rect x="168" y="184" width="176" height="144" fill="#0a0a0a"/>
+
+    <!-- Arrow in center -->
+    <polygon points="232,230 232,282 280,256" fill="#ffffff"/>
+  </g>
+</svg>
