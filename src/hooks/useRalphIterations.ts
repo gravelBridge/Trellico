@@ -257,23 +257,19 @@ export function useRalphIterations({
           store.viewSession(sessionId);
         }
       } else if (iteration.session_id) {
-        // Check if this session has an active process running
-        if (store.isSessionRunning(iteration.session_id)) {
-          store.viewSession(iteration.session_id);
-        } else {
-          // Load historical session from disk
-          try {
-            const history = await invoke<ClaudeMessage[]>("load_session_history", {
-              folderPath,
-              sessionId: iteration.session_id,
-            });
-            // Skip the first user message (the hidden prompt)
-            const filteredHistory =
-              history.length > 0 && history[0].type === "user" ? history.slice(1) : history;
-            store.viewSession(iteration.session_id, filteredHistory);
-          } catch (err) {
-            console.error("Failed to load session history:", err);
-          }
+        // Always load from disk for completed iterations
+        // (with single-session cache, we don't keep old messages in memory)
+        try {
+          const history = await invoke<ClaudeMessage[]>("load_session_history", {
+            folderPath,
+            sessionId: iteration.session_id,
+          });
+          // Skip the first user message (the hidden prompt)
+          const filteredHistory =
+            history.length > 0 && history[0].type === "user" ? history.slice(1) : history;
+          store.viewSession(iteration.session_id, filteredHistory);
+        } catch (err) {
+          console.error("Failed to load session history:", err);
         }
       }
     },
