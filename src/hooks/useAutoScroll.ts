@@ -12,11 +12,17 @@ export function useAutoScroll(messages: ClaudeMessage[]) {
     const element = scrollRef.current;
     if (!element) return;
 
-    // If we switched to a different DOM element, restore saved scroll position
+    // If we switched to a different DOM element, restore scroll position
     if (lastElement.current !== null && lastElement.current !== element) {
       requestAnimationFrame(() => {
         if (scrollRef.current) {
-          scrollRef.current.scrollTop = savedScrollPosition.current;
+          // If user was at the bottom, stay at the bottom (content reflows on width change)
+          // Otherwise restore the saved position
+          if (shouldAutoScroll.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+          } else {
+            scrollRef.current.scrollTop = savedScrollPosition.current;
+          }
         }
       });
     }
