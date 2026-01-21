@@ -1,14 +1,14 @@
 import { createContext } from "react";
 import type { ClaudeMessage } from "@/types";
 
-// State shape
+// Simplified state shape - only cache the currently viewed session
 export interface MessageStoreState {
-  // Messages stored per session ID (empty string = unsaved session)
-  sessions: Record<string, ClaudeMessage[]>;
-  // Running processes: processId -> sessionId
+  // Currently viewed session ID
+  activeSessionId: string | null;
+  // Messages for the active session only (not all sessions)
+  messages: ClaudeMessage[];
+  // All running processes: processId -> sessionId (for tracking what's running)
   runningProcesses: Record<string, string>;
-  // The session being displayed in UI
-  viewedSessionId: string | null;
 }
 
 // Context value type
@@ -28,13 +28,11 @@ export interface MessageStoreContextValue {
   endProcess: (processId: string) => void;
   addMessage: (message: ClaudeMessage, processId: string) => void;
   viewSession: (sessionId: string | null, messages?: ClaudeMessage[]) => void;
-  loadSessionHistory: (sessionId: string, messages: ClaudeMessage[]) => void;
   clearView: () => void;
   // Get current state synchronously (always up-to-date, even before React re-renders)
   getStateRef: () => MessageStoreState;
   // Convenience getters
   getViewedMessagesRef: () => ClaudeMessage[];
-  getSessionMessagesRef: (sessionId: string) => ClaudeMessage[];
   getProcessSessionId: (processId: string) => string | null;
 }
 

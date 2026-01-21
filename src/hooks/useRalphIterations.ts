@@ -16,12 +16,18 @@ interface UseRalphIterationsReturn {
   ralphingPrd: string | null;
   currentIteration: number | null;
   selectedIteration: { prd: string; iteration: number } | null;
+  currentProcessId: string | null;
   startRalphing: (prdName: string) => Promise<void>;
   stopRalphing: () => void;
   selectIteration: (prdName: string, iterationNumber: number) => void;
   clearIterationSelection: () => void;
   handleClaudeExit: (messages: ClaudeMessage[], sessionId: string) => void;
 }
+
+// State machine for ralph execution status
+type RalphStatus =
+  | { status: "idle" }
+  | { status: "running"; prdName: string; iterationNumber: number; processId: string };
 
 function isComplete(messages: ClaudeMessage[]): boolean {
   // Check last few assistant messages for the stop signal
@@ -53,32 +59,38 @@ export function useRalphIterations({
   runClaude,
 }: UseRalphIterationsProps): UseRalphIterationsReturn {
   const store = useMessageStore();
+
+  // Iterations loaded from backend (source of truth is the file)
   const [iterations, setIterations] = useState<Record<string, RalphIteration[]>>({});
-  const [isRalphing, setIsRalphing] = useState(false);
-  const [ralphingPrd, setRalphingPrd] = useState<string | null>(null);
-  const [currentIteration, setCurrentIteration] = useState<number | null>(null);
+
+  // State machine for ralph execution - replaces all the individual refs
+  const [ralphState, setRalphState] = useState<RalphStatus>({ status: "idle" });
+
+  // Selected iteration for viewing
   const [selectedIteration, setSelectedIteration] = useState<{
     prd: string;
     iteration: number;
   } | null>(null);
 
-  // Use refs to track state for the exit callback - these are updated synchronously
-  const isRalphingRef = useRef(false);
-  const ralphingPrdRef = useRef<string | null>(null);
-  const currentIterationRef = useRef<number | null>(null);
-  const folderPathRef = useRef<string | null>(null);
-  const currentProcessIdRef = useRef<string | null>(null);
-  // Guard to prevent starting a new iteration while one is being processed
-  const processingExitRef = useRef(false);
+  // Ref for the current ralph state - needed for async callbacks
+  // This is the ONLY ref we need, and it's kept in sync with ralphState
+  const ralphStateRef = useRef<RalphStatus>({ status: "idle" });
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    ralphStateRef.current = ralphState;
+  }, [ralphState]);
+
   // Debounce ref for file change events
   const reloadDebounceRef = useRef<number | null>(null);
 
-  // Keep folder ref in sync
-  useEffect(() => {
-    folderPathRef.current = folderPath;
-  }, [folderPath]);
+  // Derived values from state machine
+  const isRalphing = ralphState.status === "running";
+  const ralphingPrd = ralphState.status === "running" ? ralphState.prdName : null;
+  const currentIteration = ralphState.status === "running" ? ralphState.iterationNumber : null;
+  const currentProcessId = ralphState.status === "running" ? ralphState.processId : null;
 
-  // Load all iterations from file
+  // Load all iterations from file (backend is source of truth)
   const loadAllIterations = useCallback(async () => {
     if (!folderPath) return;
     try {
@@ -127,8 +139,8 @@ export function useRalphIterations({
   }, [folderPath, loadAllIterations]);
 
   const createAndStartIteration = useCallback(
-    async (prdName: string, iterationNumber: number) => {
-      if (!folderPath) return;
+    async (prdName: string, iterationNumber: number): Promise<string | null> => {
+      if (!folderPath) return null;
 
       const now = new Date().toISOString();
       const newIteration: RalphIteration = {
@@ -138,42 +150,26 @@ export function useRalphIterations({
         created_at: now,
       };
 
-      // Save iteration to backend
+      // Save iteration to backend (file watcher will update local state)
       await invoke("save_ralph_iteration", {
         folderPath,
         prdName,
         iteration: newIteration,
       });
 
-      // Update local state
-      setIterations((prev) => ({
-        ...prev,
-        [prdName]: [...(prev[prdName] || []), newIteration],
-      }));
-
-      setCurrentIteration(iterationNumber);
-
-      // Build the prd path and run Claude (this will start a new live session in the store)
+      // Build the prd path and run Claude
       const prdPath = `.trellico/ralph/${prdName}/prd.json`;
       const prompt = getRalphPrompt(prdPath);
 
       const processId = await runClaude(prompt, folderPath, null);
-      currentProcessIdRef.current = processId;
+      return processId;
     },
     [folderPath, runClaude]
   );
 
   const startRalphing = useCallback(
     async (prdName: string) => {
-      if (!folderPath || isRalphingRef.current) return;
-
-      // Update refs synchronously before any async operations
-      isRalphingRef.current = true;
-      ralphingPrdRef.current = prdName;
-
-      setIsRalphing(true);
-      setRalphingPrd(prdName);
-      setSelectedIteration(null);
+      if (!folderPath || ralphStateRef.current.status === "running") return;
 
       // Load existing iterations to determine next iteration number
       let prdIterations: RalphIteration[] = [];
@@ -182,54 +178,53 @@ export function useRalphIterations({
           folderPath,
           prdName,
         });
-        setIterations((prev) => ({ ...prev, [prdName]: prdIterations }));
       } catch (err) {
         console.error("Failed to load iterations:", err);
       }
 
       const nextIterationNumber = prdIterations.length + 1;
-      currentIterationRef.current = nextIterationNumber;
+
+      // Clear selection before starting
+      setSelectedIteration(null);
+
+      // Create and start the iteration
+      const processId = await createAndStartIteration(prdName, nextIterationNumber);
+      if (!processId) return;
+
+      // Update state machine - single state update
+      setRalphState({
+        status: "running",
+        prdName,
+        iterationNumber: nextIterationNumber,
+        processId,
+      });
+
       // Auto-select the new iteration
       setSelectedIteration({ prd: prdName, iteration: nextIterationNumber });
-      await createAndStartIteration(prdName, nextIterationNumber);
     },
     [folderPath, createAndStartIteration]
   );
 
   const stopRalphing = useCallback(async () => {
-    const prd = ralphingPrdRef.current;
-    const iterNum = currentIterationRef.current;
+    const currentState = ralphStateRef.current;
+    if (currentState.status !== "running") return;
 
-    // Update refs synchronously first
-    isRalphingRef.current = false;
-    ralphingPrdRef.current = null;
-    currentIterationRef.current = null;
-    currentProcessIdRef.current = null;
+    const { prdName, iterationNumber } = currentState;
 
-    setIsRalphing(false);
-    setRalphingPrd(null);
-    setCurrentIteration(null);
+    // Update state machine first
+    setRalphState({ status: "idle" });
 
-    if (!folderPath || !prd || iterNum === null) {
-      return;
-    }
+    if (!folderPath) return;
 
-    // Update the current iteration status to "stopped"
+    // Update the current iteration status to "stopped" in backend
     try {
       await invoke("update_ralph_iteration_status", {
         folderPath,
-        prdName: prd,
-        iterationNumber: iterNum,
+        prdName,
+        iterationNumber,
         status: "stopped",
       });
-
-      // Update local state
-      setIterations((prev) => ({
-        ...prev,
-        [prd]: (prev[prd] || []).map((iter) =>
-          iter.iteration_number === iterNum ? { ...iter, status: "stopped" } : iter
-        ),
-      }));
+      // File watcher will update local state
     } catch (err) {
       console.error("Failed to update iteration status:", err);
     }
@@ -248,28 +243,25 @@ export function useRalphIterations({
       if (!iteration) return;
 
       // Check if this is the currently running iteration
+      const currentState = ralphStateRef.current;
       const isCurrentRunningIteration =
-        isRalphingRef.current &&
-        ralphingPrdRef.current === prdName &&
-        currentIterationRef.current === iterationNumber;
+        currentState.status === "running" &&
+        currentState.prdName === prdName &&
+        currentState.iterationNumber === iterationNumber;
 
       if (isCurrentRunningIteration) {
-        // Switch to viewing the live session (session_id may not be persisted yet)
-        // Look up the session from the current process
-        const processId = currentProcessIdRef.current;
-        if (processId) {
-          const sessionId = store.getProcessSessionId(processId);
-          if (sessionId) {
-            store.viewSession(sessionId);
-          }
+        // Switch to viewing the live session
+        const sessionId = store.getProcessSessionId(currentState.processId);
+        if (sessionId) {
+          // For live session, just switch to it (messages are already accumulating)
+          store.viewSession(sessionId);
         }
       } else if (iteration.session_id) {
-        // Check if this session has an active process running (e.g., user sent a follow-up message)
-        // If so, just view the in-memory session without overwriting with historical data
+        // Check if this session has an active process running
         if (store.isSessionRunning(iteration.session_id)) {
           store.viewSession(iteration.session_id);
         } else {
-          // Load historical session
+          // Load historical session from disk
           try {
             const history = await invoke<ClaudeMessage[]>("load_session_history", {
               folderPath,
@@ -292,106 +284,52 @@ export function useRalphIterations({
     setSelectedIteration(null);
   }, []);
 
-  // Handle Claude exit - this is called from useClaudeSession when claude-exit event fires
+  // Handle Claude exit - called from useClaudeSession when claude-exit event fires
   const handleClaudeExit = useCallback(
     async (messages: ClaudeMessage[], sessionId: string) => {
-      // Use refs for current state since this is called from an event listener
-      if (!isRalphingRef.current || !ralphingPrdRef.current || !folderPathRef.current) {
-        return;
-      }
+      // Read current state from ref (always up-to-date)
+      const currentState = ralphStateRef.current;
+      if (currentState.status !== "running") return;
 
-      // Prevent concurrent processing
-      if (processingExitRef.current) {
-        return;
-      }
-      processingExitRef.current = true;
+      const { prdName, iterationNumber } = currentState;
 
-      const prdName = ralphingPrdRef.current;
-      const iterNum = currentIterationRef.current;
-      const folder = folderPathRef.current;
+      if (!folderPath) return;
 
-      // Use the session ID passed from the callback
-      const newSessionId = sessionId;
-
-      if (newSessionId && iterNum !== null) {
+      try {
         // Persist the session ID to the backend
-        try {
+        if (sessionId) {
           await invoke("update_ralph_iteration_session_id", {
-            folderPath: folder,
+            folderPath,
             prdName,
-            iterationNumber: iterNum,
-            sessionId: newSessionId,
+            iterationNumber,
+            sessionId,
           });
-        } catch (err) {
-          console.error("Failed to update iteration session ID:", err);
         }
 
-        // Update local state as well
-        setIterations((prev) => ({
-          ...prev,
-          [prdName]: (prev[prdName] || []).map((iter) =>
-            iter.iteration_number === iterNum ? { ...iter, session_id: newSessionId } : iter
-          ),
-        }));
-      }
-
-      // Check if complete
-      if (isComplete(messages)) {
-        // Mark iteration as completed and stop ralphing
-        // Update refs synchronously first
-        isRalphingRef.current = false;
-        ralphingPrdRef.current = null;
-        currentIterationRef.current = null;
-        currentProcessIdRef.current = null;
-
-        try {
+        // Check if complete
+        if (isComplete(messages)) {
+          // Mark iteration as completed and stop ralphing
           await invoke("update_ralph_iteration_status", {
-            folderPath: folder,
+            folderPath,
             prdName,
-            iterationNumber: iterNum,
+            iterationNumber,
             status: "completed",
           });
 
-          setIterations((prev) => ({
-            ...prev,
-            [prdName]: (prev[prdName] || []).map((iter) =>
-              iter.iteration_number === iterNum ? { ...iter, status: "completed" } : iter
-            ),
-          }));
-        } catch (err) {
-          console.error("Failed to update iteration status:", err);
-        }
-
-        setIsRalphing(false);
-        setRalphingPrd(null);
-        setCurrentIteration(null);
-        processingExitRef.current = false;
-      } else {
-        // Mark current iteration as completed (it finished without COMPLETE signal)
-        try {
+          // Update state machine to idle
+          setRalphState({ status: "idle" });
+        } else {
+          // Mark current iteration as completed (it finished without COMPLETE signal)
           await invoke("update_ralph_iteration_status", {
-            folderPath: folder,
+            folderPath,
             prdName,
-            iterationNumber: iterNum,
+            iterationNumber,
             status: "completed",
           });
 
-          setIterations((prev) => ({
-            ...prev,
-            [prdName]: (prev[prdName] || []).map((iter) =>
-              iter.iteration_number === iterNum ? { ...iter, status: "completed" } : iter
-            ),
-          }));
-        } catch (err) {
-          console.error("Failed to update iteration status:", err);
-        }
+          // Start next iteration
+          const nextIterationNumber = iterationNumber + 1;
 
-        // Start next iteration - update ref synchronously first
-        const nextIterationNumber = (iterNum || 0) + 1;
-        currentIterationRef.current = nextIterationNumber;
-
-        try {
-          // Create new iteration
           const now = new Date().toISOString();
           const newIteration: RalphIteration = {
             iteration_number: nextIterationNumber,
@@ -401,42 +339,34 @@ export function useRalphIterations({
           };
 
           await invoke("save_ralph_iteration", {
-            folderPath: folder,
+            folderPath,
             prdName,
             iteration: newIteration,
           });
 
-          setIterations((prev) => ({
-            ...prev,
-            [prdName]: [...(prev[prdName] || []), newIteration],
-          }));
-
-          setCurrentIteration(nextIterationNumber);
-          // Auto-select the new iteration
-          setSelectedIteration({ prd: prdName, iteration: nextIterationNumber });
-
-          // Allow processing again before running Claude
-          processingExitRef.current = false;
-
-          // Run Claude with new session (this will start a new live session in the store)
+          // Run Claude with new session
           const prdPath = `.trellico/ralph/${prdName}/prd.json`;
           const prompt = getRalphPrompt(prdPath);
-          const processId = await runClaude(prompt, folder, null);
-          currentProcessIdRef.current = processId;
-        } catch (err) {
-          console.error("Failed to start next iteration:", err);
-          isRalphingRef.current = false;
-          ralphingPrdRef.current = null;
-          currentIterationRef.current = null;
-          currentProcessIdRef.current = null;
-          setIsRalphing(false);
-          setRalphingPrd(null);
-          setCurrentIteration(null);
-          processingExitRef.current = false;
+          const processId = await runClaude(prompt, folderPath, null);
+
+          // Update state machine with new iteration
+          setRalphState({
+            status: "running",
+            prdName,
+            iterationNumber: nextIterationNumber,
+            processId,
+          });
+
+          // Auto-select the new iteration
+          setSelectedIteration({ prd: prdName, iteration: nextIterationNumber });
         }
+      } catch (err) {
+        console.error("Failed to handle Claude exit:", err);
+        // On error, reset to idle state
+        setRalphState({ status: "idle" });
       }
     },
-    [runClaude]
+    [folderPath, runClaude]
   );
 
   return {
@@ -445,6 +375,7 @@ export function useRalphIterations({
     ralphingPrd,
     currentIteration,
     selectedIteration,
+    currentProcessId,
     startRalphing,
     stopRalphing,
     selectIteration,

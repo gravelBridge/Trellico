@@ -87,11 +87,11 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
         if (!processInfo) return;
 
         // Call the exit callback with messages for this session
+        // Use getViewedMessagesRef since we only cache the viewed session
+        const messages = store.getViewedMessagesRef();
         if (processInfo.onExit) {
-          const messages = store.getSessionMessagesRef(processInfo.sessionId);
           processInfo.onExit(messages);
         } else if (onClaudeExitRef.current) {
-          const messages = store.getSessionMessagesRef(processInfo.sessionId);
           onClaudeExitRef.current(messages, processInfo.sessionId);
         }
 

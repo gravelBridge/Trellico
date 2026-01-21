@@ -32,7 +32,7 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd }: UseRalphPrdsOption
 
   // Handle pending link when session ID becomes available
   useEffect(() => {
-    const viewedSessionId = store.state.viewedSessionId;
+    const viewedSessionId = store.state.activeSessionId;
 
     if (pendingLinkPrd && viewedSessionId && !viewedSessionId.startsWith("__pending__") && folderPath) {
       invoke("save_ralph_link", {
@@ -49,7 +49,7 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd }: UseRalphPrdsOption
           setPendingLinkPrd(null);
         });
     }
-  }, [pendingLinkPrd, store.state.viewedSessionId, folderPath]);
+  }, [pendingLinkPrd, store.state.activeSessionId, folderPath]);
 
   // Define selectRalphPrd first since handleRalphPrdsChange depends on it
   const selectRalphPrd = useCallback(
@@ -123,7 +123,7 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd }: UseRalphPrdsOption
           selectRalphPrdRef.current?.(added[0], false);
           onAutoSelectPrd?.(added[0]);
           // Link session to this PRD using the currently viewed session
-          const viewedSessionId = getStateRef().viewedSessionId;
+          const viewedSessionId = getStateRef().activeSessionId;
           if (viewedSessionId && !viewedSessionId.startsWith("__pending__")) {
             // Session ID is already available, save link immediately
             invoke("save_ralph_link", {

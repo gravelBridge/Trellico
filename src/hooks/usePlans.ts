@@ -31,7 +31,7 @@ export function usePlans({ folderPath }: UsePlansOptions) {
 
   // Handle pending link when session ID becomes available
   useEffect(() => {
-    const viewedSessionId = store.state.viewedSessionId;
+    const viewedSessionId = store.state.activeSessionId;
 
     if (pendingLinkPlan && viewedSessionId && !viewedSessionId.startsWith("__pending__") && folderPath) {
       invoke("save_session_link", {
@@ -48,7 +48,7 @@ export function usePlans({ folderPath }: UsePlansOptions) {
           setPendingLinkPlan(null);
         });
     }
-  }, [pendingLinkPlan, store.state.viewedSessionId, folderPath]);
+  }, [pendingLinkPlan, store.state.activeSessionId, folderPath]);
 
   // Define selectPlan first since handlePlansChange depends on it
   const selectPlan = useCallback(
@@ -171,7 +171,7 @@ export function usePlans({ folderPath }: UsePlansOptions) {
             selectPlanRef.current?.(newPlan, false);
 
             // Link to current session using the currently viewed session
-            const viewedSessionId = getStateRef().viewedSessionId;
+            const viewedSessionId = getStateRef().activeSessionId;
             if (viewedSessionId && !viewedSessionId.startsWith("__pending__")) {
               // Session ID is already available, save link immediately
               invoke("save_session_link", {

@@ -129,7 +129,7 @@ function App() {
     // Only block if the currently viewed session is running
     if (!message.trim() || !folderPath || isViewingRunning) return;
 
-    const isNewSession = !store.state.viewedSessionId;
+    const isNewSession = !store.state.activeSessionId;
 
     resetAutoScroll();
 
@@ -139,7 +139,7 @@ function App() {
 
     try {
       // Pass the user's message to display (always show what the user typed)
-      await runClaude(fullMessage, folderPath, store.state.viewedSessionId, message);
+      await runClaude(fullMessage, folderPath, store.state.activeSessionId, message);
     } catch {
       // Error already handled in hook
     }
@@ -308,7 +308,7 @@ function App() {
                   onSubmit={handleSubmit}
                   onStop={stopClaude}
                   isRunning={isViewingRunning}
-                  placeholder={store.state.viewedSessionId ? "Follow up..." : "Ask anything..."}
+                  placeholder={store.state.activeSessionId ? "Follow up..." : "Ask anything..."}
                   rows={3}
                   autoFocus
                 />
