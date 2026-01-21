@@ -243,10 +243,12 @@ function App() {
     let isActive = true;
 
     // Folder changed - restore saved state immediately (hooks clear state synchronously now)
-    // Check if a generating item is selected
+    // Check if a generating item is selected AND matches the active tab
     if (selectedGeneratingItemId) {
       const item = generatingItems.find(i => i.id === selectedGeneratingItemId);
-      if (item?.sessionId) {
+      // Only restore generating item's session if its type matches the active tab
+      const itemMatchesTab = item?.type === "plan" ? activeTab === "plans" : activeTab === "ralph";
+      if (item?.sessionId && itemMatchesTab) {
         // Load the generating item's session
         const sessionId = item.sessionId;
         const runningMessages = storeRef.current.getRunningSessionMessages(sessionId);

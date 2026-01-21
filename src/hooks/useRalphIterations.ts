@@ -264,9 +264,18 @@ export function useRalphIterations({
 
       setSelectedIteration({ prd: prdName, iteration: iterationNumber });
 
-      // Find the iteration
-      const prdIterations = iterations[prdName] || [];
-      const iteration = prdIterations.find((i) => i.iteration_number === iterationNumber);
+      // Fetch iteration directly from backend (local state may be stale after folder switch)
+      let iteration: RalphIteration | undefined;
+      try {
+        const prdIterations = await invoke<RalphIteration[]>("get_ralph_iterations", {
+          folderPath,
+          prdName,
+        });
+        iteration = prdIterations.find((i) => i.iteration_number === iterationNumber);
+      } catch (err) {
+        console.error("Failed to fetch iterations:", err);
+        return;
+      }
 
       if (!iteration) return;
 
@@ -301,7 +310,7 @@ export function useRalphIterations({
         }
       }
     },
-    [folderPath, iterations, store]
+    [folderPath, store]
   );
 
   const clearIterationSelection = useCallback(() => {
