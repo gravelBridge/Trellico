@@ -1,13 +1,28 @@
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useCallback, useEffect } from "react";
 import type { ClaudeMessage } from "@/types";
 
 export function useAutoScroll(messages: ClaudeMessage[]) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const shouldAutoScroll = useRef(true);
-  const scrollTimeoutRef = useRef<number | null>(null);
-  const [showScrollbar, setShowScrollbar] = useState(false);
+  const savedScrollPosition = useRef<number>(0);
+  const lastElement = useRef<HTMLDivElement | null>(null);
 
-  // Auto-scroll to bottom when messages change
+  // Preserve scroll position when the scroll container element changes
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+
+    // If we switched to a different DOM element, restore saved scroll position
+    if (lastElement.current !== null && lastElement.current !== element) {
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = savedScrollPosition.current;
+        }
+      });
+    }
+    lastElement.current = element;
+  });
+
   useEffect(() => {
     if (scrollRef.current && shouldAutoScroll.current) {
       requestAnimationFrame(() => {
@@ -20,31 +35,10 @@ export function useAutoScroll(messages: ClaudeMessage[]) {
 
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
-
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 20;
-    const wasAutoScrolling = shouldAutoScroll.current;
-    shouldAutoScroll.current = isAtBottom;
-
-    // Only show scrollbar when user has broken auto-scroll (not at bottom)
-    if (!shouldAutoScroll.current) {
-      setShowScrollbar(true);
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-      scrollTimeoutRef.current = window.setTimeout(() => {
-        setShowScrollbar(false);
-      }, 500);
-    }
-
-    // If user scrolled back to bottom, hide scrollbar immediately
-    if (shouldAutoScroll.current && !wasAutoScrolling) {
-      setShowScrollbar(false);
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-        scrollTimeoutRef.current = null;
-      }
-    }
+    shouldAutoScroll.current = scrollHeight - scrollTop - clientHeight < 20;
+    // Save scroll position for restoration when view changes
+    savedScrollPosition.current = scrollTop;
   }, []);
 
   const resetAutoScroll = useCallback(() => {
@@ -62,7 +56,7 @@ export function useAutoScroll(messages: ClaudeMessage[]) {
 
   return {
     scrollRef,
-    showScrollbar,
+    showScrollbar: false,
     handleScroll,
     resetAutoScroll,
     scrollToBottom,

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "trellico",
+  "productName": "Trellico",
   "version": "0.1.0",
   "identifier": "com.john.trellico",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "trellico",
+        "title": "Trellico",
         "width": 1024,
         "height": 768,
         "minWidth": 600,

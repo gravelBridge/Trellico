@@ -23,48 +23,40 @@ export function usePlans({ folderPath }: UsePlansOptions) {
   const prevPlansRef = useRef<string[]>([]);
   const plansDebounceRef = useRef<number | null>(null);
   const selectPlanRef = useRef<((planName: string, autoLoadHistory?: boolean) => Promise<void>) | null>(null);
+  const pendingLinkPlanRef = useRef<string | null>(null);
+  const folderPathRef = useRef<string | null>(null);
 
-  // Keep selectedPlanRef in sync (needed for file watcher callback)
+  // Keep refs in sync
   useEffect(() => {
     selectedPlanRef.current = selectedPlan;
   }, [selectedPlan]);
 
-  // Handle pending link when session ID becomes available
   useEffect(() => {
-    const viewedSessionId = store.state.activeSessionId;
+    pendingLinkPlanRef.current = pendingLinkPlan;
+  }, [pendingLinkPlan]);
 
-    if (pendingLinkPlan && viewedSessionId && !viewedSessionId.startsWith("__pending__") && folderPath) {
-      invoke("save_session_link", {
-        folderPath,
-        sessionId: viewedSessionId,
-        planFileName: pendingLinkPlan,
-      })
-        .then(() => {
-          setLinkedSessionId(viewedSessionId);
-          setPendingLinkPlan(null);
-        })
-        .catch((err) => {
-          console.error("Failed to save session link:", err);
-          setPendingLinkPlan(null);
-        });
-    }
-  }, [pendingLinkPlan, store.state.activeSessionId, folderPath]);
+  useEffect(() => {
+    folderPathRef.current = folderPath;
+  }, [folderPath]);
 
   // Define selectPlan first since handlePlansChange depends on it
   const selectPlan = useCallback(
     async (planName: string, autoLoadHistory = true) => {
       if (!folderPath) return;
 
-      setSelectedPlan(planName);
-      selectedPlanRef.current = planName;
-
+      // Load content first before updating state to avoid intermediate render
+      // where selectedPlan is set but planContent is null (causes scroll reset)
+      let content: string | null = null;
       try {
-        const content = await invoke<string>("read_plan", { folderPath, planName });
-        setPlanContent(content);
+        content = await invoke<string>("read_plan", { folderPath, planName });
       } catch (err) {
         console.error("Failed to read plan:", err);
-        setPlanContent(null);
       }
+
+      // Set both states together to avoid view flickering
+      setSelectedPlan(planName);
+      selectedPlanRef.current = planName;
+      setPlanContent(content);
 
       // Check for linked session
       if (autoLoadHistory) {
@@ -253,6 +245,28 @@ export function usePlans({ folderPath }: UsePlansOptions) {
     };
   }, [folderPath, handlePlansChange]);
 
+  // Handle session ID received - persist link immediately so we don't lose it
+  const handleSessionIdReceived = useCallback(
+    async (_processId: string, sessionId: string) => {
+      const pending = pendingLinkPlanRef.current;
+      const folder = folderPathRef.current;
+      if (!pending || !folder) return;
+
+      try {
+        await invoke("save_session_link", {
+          folderPath: folder,
+          sessionId,
+          planFileName: pending,
+        });
+        setLinkedSessionId(sessionId);
+        setPendingLinkPlan(null);
+      } catch (err) {
+        console.error("Failed to save session link:", err);
+      }
+    },
+    []
+  );
+
   return {
     plans,
     selectedPlan,
@@ -261,5 +275,6 @@ export function usePlans({ folderPath }: UsePlansOptions) {
     setLinkedSessionId,
     selectPlan,
     clearSelection,
+    handleSessionIdReceived,
   };
 }

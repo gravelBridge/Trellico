@@ -8,16 +8,18 @@ function FlowingIndicator() {
   return (
     <div className="absolute -top-px left-0 right-0 h-0.5 overflow-hidden z-10">
       <div
-        className="h-full w-1/3"
+        className="h-full w-full"
         style={{
           background: "linear-gradient(90deg, transparent, #f97316, #fb923c, #f97316, transparent)",
-          animation: "flowAnimation 1.5s ease-in-out infinite",
+          backgroundSize: "33% 100%",
+          backgroundRepeat: "no-repeat",
+          animation: "flowAnimation 1.5s ease-in-out infinite alternate",
         }}
       />
       <style>{`
         @keyframes flowAnimation {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(400%); }
+          0% { background-position: -33% 0; }
+          100% { background-position: 133% 0; }
         }
       `}</style>
     </div>
