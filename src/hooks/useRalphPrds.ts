@@ -29,6 +29,7 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
   const ralphPrdsDebounceRef = useRef<number | null>(null);
   const selectedRalphPrdRef = useRef<string | null>(null);
   const selectRalphPrdRef = useRef<((prdName: string, autoLoadHistory?: boolean) => Promise<void>) | null>(null);
+  const folderPathRef = useRef<string | null>(folderPath);
 
   // Clear state synchronously when folder changes (React pattern for adjusting state based on props)
   // Refs will be synced by existing useEffects
@@ -45,6 +46,10 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
   useEffect(() => {
     selectedRalphPrdRef.current = selectedRalphPrd;
   }, [selectedRalphPrd]);
+
+  useEffect(() => {
+    folderPathRef.current = folderPath;
+  }, [folderPath]);
 
   // Handle pending link when session ID becomes available
   useEffect(() => {
@@ -73,11 +78,16 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
     async (prdName: string, autoLoadHistory = true) => {
       if (!folderPath) return;
 
+      // Capture folder path to detect switches during async operations
+      const capturedFolderPath = folderPath;
+
       selectedRalphPrdRef.current = prdName;
       setSelectedRalphPrd(prdName);
 
       try {
-        const content = await invoke<string>("read_ralph_prd", { folderPath, prdName });
+        const content = await invoke<string>("read_ralph_prd", { folderPath: capturedFolderPath, prdName });
+        // Abort if folder changed during async operation
+        if (folderPathRef.current !== capturedFolderPath) return;
         setRalphPrdContent(content);
       } catch (err) {
         console.error("Failed to read ralph prd:", err);
@@ -87,15 +97,19 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
       if (autoLoadHistory) {
         try {
           const link = await invoke<SessionPlanLink | null>("get_link_by_ralph_prd", {
-            folderPath,
+            folderPath: capturedFolderPath,
             prdFileName: prdName,
           });
+          // Abort if folder changed during async operation
+          if (folderPathRef.current !== capturedFolderPath) return;
           if (link) {
             setRalphLinkedSessionId(link.session_id);
             const history = await invoke<ClaudeMessage[]>("load_session_history", {
-              folderPath,
+              folderPath: capturedFolderPath,
               sessionId: link.session_id,
             });
+            // Abort if folder changed during async operation
+            if (folderPathRef.current !== capturedFolderPath) return;
             // Skip the first user message (the hidden prompt)
             const filteredHistory =
               history.length > 0 && history[0].type === "user" ? history.slice(1) : history;

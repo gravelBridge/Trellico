@@ -59,14 +59,20 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
     async (planName: string, autoLoadHistory = true) => {
       if (!folderPath) return;
 
+      // Capture folder path to detect switches during async operations
+      const capturedFolderPath = folderPath;
+
       // Load content first before updating state to avoid intermediate render
       // where selectedPlan is set but planContent is null (causes scroll reset)
       let content: string | null = null;
       try {
-        content = await invoke<string>("read_plan", { folderPath, planName });
+        content = await invoke<string>("read_plan", { folderPath: capturedFolderPath, planName });
       } catch (err) {
         console.error("Failed to read plan:", err);
       }
+
+      // Abort if folder changed during async operation
+      if (folderPathRef.current !== capturedFolderPath) return;
 
       // Set both states together to avoid view flickering
       setSelectedPlan(planName);
@@ -77,9 +83,12 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
       if (autoLoadHistory) {
         try {
           const link = await invoke<SessionPlanLink | null>("get_link_by_plan", {
-            folderPath,
+            folderPath: capturedFolderPath,
             planFileName: planName,
           });
+
+          // Abort if folder changed during async operation
+          if (folderPathRef.current !== capturedFolderPath) return;
 
           if (link) {
             setLinkedSessionId(link.session_id);
@@ -87,9 +96,11 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
             // Load chat history and view it
             try {
               const history = await invoke<ClaudeMessage[]>("load_session_history", {
-                folderPath,
+                folderPath: capturedFolderPath,
                 sessionId: link.session_id,
               });
+              // Abort if folder changed during async operation
+              if (folderPathRef.current !== capturedFolderPath) return;
               store.viewSession(link.session_id, history);
             } catch (historyErr) {
               console.error("Failed to load session history:", historyErr);

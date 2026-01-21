@@ -79,8 +79,10 @@ export function useRalphIterations({
   const [prevFolderPath, setPrevFolderPath] = useState<string | null>(folderPath);
 
   // Ref for the current ralph state - needed for async callbacks
-  // This is the ONLY ref we need, and it's kept in sync with ralphState
   const ralphStateRef = useRef<RalphStatus>({ status: "idle" });
+
+  // Ref for folder path - needed to detect folder switches in async callbacks
+  const folderPathRef = useRef<string | null>(folderPath);
 
   // Clear state synchronously when folder changes (React pattern for adjusting state based on props)
   // Refs will be synced by existing useEffects
@@ -91,10 +93,14 @@ export function useRalphIterations({
     setRalphState({ status: "idle" });
   }
 
-  // Keep ref in sync with state
+  // Keep refs in sync with state
   useEffect(() => {
     ralphStateRef.current = ralphState;
   }, [ralphState]);
+
+  useEffect(() => {
+    folderPathRef.current = folderPath;
+  }, [folderPath]);
 
   // Debounce ref for file change events
   const reloadDebounceRef = useRef<number | null>(null);
@@ -262,13 +268,16 @@ export function useRalphIterations({
     async (prdName: string, iterationNumber: number) => {
       if (!folderPath) return;
 
+      // Capture folder path to detect switches during async operations
+      const capturedFolderPath = folderPath;
+
       setSelectedIteration({ prd: prdName, iteration: iterationNumber });
 
       // Fetch iteration directly from backend (local state may be stale after folder switch)
       let iteration: RalphIteration | undefined;
       try {
         const prdIterations = await invoke<RalphIteration[]>("get_ralph_iterations", {
-          folderPath,
+          folderPath: capturedFolderPath,
           prdName,
         });
         iteration = prdIterations.find((i) => i.iteration_number === iterationNumber);
@@ -276,6 +285,9 @@ export function useRalphIterations({
         console.error("Failed to fetch iterations:", err);
         return;
       }
+
+      // Abort if folder changed during async operation
+      if (folderPathRef.current !== capturedFolderPath) return;
 
       if (!iteration) return;
 
@@ -298,9 +310,11 @@ export function useRalphIterations({
         // (with single-session cache, we don't keep old messages in memory)
         try {
           const history = await invoke<ClaudeMessage[]>("load_session_history", {
-            folderPath,
+            folderPath: capturedFolderPath,
             sessionId: iteration.session_id,
           });
+          // Abort if folder changed during async operation
+          if (folderPathRef.current !== capturedFolderPath) return;
           // Skip the first user message (the hidden prompt)
           const filteredHistory =
             history.length > 0 && history[0].type === "user" ? history.slice(1) : history;
