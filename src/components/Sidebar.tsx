@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { kebabToTitle } from "@/lib/formatting";
-import type { RalphIteration } from "@/types";
+import type { RalphIteration, GeneratingItem } from "@/types";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -23,6 +23,10 @@ interface SidebarProps {
   ralphIterations: Record<string, RalphIteration[]>;
   selectedRalphIteration: { prd: string; iteration: number } | null;
   onSelectRalphIteration: (prd: string, iteration: number) => void;
+  generatingPlans: GeneratingItem[];
+  generatingRalphPrds: GeneratingItem[];
+  onSelectGeneratingItem: (item: GeneratingItem) => void;
+  selectedGeneratingItemId: string | null;
 }
 
 function SidebarToggleIcon() {
@@ -77,6 +81,12 @@ function StatusDot({ status }: { status: string }) {
   );
 }
 
+function LoadingDot() {
+  return (
+    <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse shrink-0" />
+  );
+}
+
 export function Sidebar({
   isOpen,
   onToggle,
@@ -95,6 +105,10 @@ export function Sidebar({
   ralphIterations,
   selectedRalphIteration,
   onSelectRalphIteration,
+  generatingPlans,
+  generatingRalphPrds,
+  onSelectGeneratingItem,
+  selectedGeneratingItemId,
 }: SidebarProps) {
   const [expandedPrds, setExpandedPrds] = useState<Set<string>>(new Set());
   const [prevIterationsKeys, setPrevIterationsKeys] = useState<string[]>([]);
@@ -169,7 +183,6 @@ export function Sidebar({
                   size="sm"
                   className="w-full justify-start gap-2 hover:bg-muted"
                   onClick={onNewPlan}
-                  disabled={isRunning}
                 >
                   <svg
                     width="14"
@@ -184,8 +197,23 @@ export function Sidebar({
                   </svg>
                   New plan
                 </Button>
-                {plans.length > 0 ? (
+                {plans.length > 0 || generatingPlans.length > 0 ? (
                   <div className="mt-2 space-y-0.5">
+                    {generatingPlans.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => onSelectGeneratingItem(item)}
+                        className={cn(
+                          "w-full text-left px-2 py-1.5 text-sm rounded-md flex items-center gap-2 transition-colors",
+                          selectedGeneratingItemId === item.id
+                            ? "bg-primary/15 text-foreground font-medium"
+                            : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                        )}
+                      >
+                        <LoadingDot />
+                        <span className="truncate italic">{item.displayName}</span>
+                      </button>
+                    ))}
                     {plans.map((plan) => (
                       <button
                         key={plan}
@@ -206,8 +234,23 @@ export function Sidebar({
                 )}
               </TabsContent>
               <TabsContent value="ralph" className="mt-0">
-                {ralphPrds.length > 0 ? (
+                {ralphPrds.length > 0 || generatingRalphPrds.length > 0 ? (
                   <div className="mt-2 space-y-0.5">
+                    {generatingRalphPrds.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => onSelectGeneratingItem(item)}
+                        className={cn(
+                          "w-full text-left px-2 py-1.5 text-sm rounded-md flex items-center gap-2 transition-colors",
+                          selectedGeneratingItemId === item.id
+                            ? "bg-primary/15 text-foreground font-medium"
+                            : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                        )}
+                      >
+                        <LoadingDot />
+                        <span className="truncate italic">{item.displayName}</span>
+                      </button>
+                    ))}
                     {ralphPrds.map((prd) => {
                       const iterations = ralphIterations[prd] || [];
                       const hasIterations = iterations.length > 0;

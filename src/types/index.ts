@@ -31,3 +31,11 @@ export interface RalphIteration {
   status: "running" | "completed" | "stopped";
   created_at: string;
 }
+
+export interface GeneratingItem {
+  id: string;              // Unique ID (use processId)
+  displayName: string;     // User message or "Converting [name]..."
+  type: "plan" | "ralph_prd";
+  sessionId: string;       // Session ID (starts as __pending__${id}, updated when real ID received)
+  targetName?: string;     // For ralph_prd: the expected prd name (plan filename)
+}

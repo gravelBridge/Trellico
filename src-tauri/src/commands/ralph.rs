@@ -12,7 +12,7 @@ pub fn list_ralph_prds(folder_path: String) -> Result<Vec<String>, String> {
         return Ok(vec![]);
     }
 
-    let mut prds = Vec::new();
+    let mut prds_with_time: Vec<(String, std::time::SystemTime)> = Vec::new();
     let entries = fs::read_dir(&ralph_path)
         .map_err(|e| format!("Failed to read ralph directory: {}", e))?;
 
@@ -23,14 +23,19 @@ pub fn list_ralph_prds(folder_path: String) -> Result<Vec<String>, String> {
             let prd_file = path.join("prd.json");
             if prd_file.exists() {
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    prds.push(name.to_string());
+                    let modified = prd_file
+                        .metadata()
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::UNIX_EPOCH);
+                    prds_with_time.push((name.to_string(), modified));
                 }
             }
         }
     }
 
-    prds.sort();
-    Ok(prds)
+    // Sort by modification time, newest first
+    prds_with_time.sort_by(|a, b| b.1.cmp(&a.1));
+    Ok(prds_with_time.into_iter().map(|(name, _)| name).collect())
 }
 
 #[tauri::command]

@@ -7,12 +7,14 @@ import { useMessageStore } from "@/contexts";
 interface UseRalphPrdsOptions {
   folderPath: string | null;
   onAutoSelectPrd?: (prdName: string) => void;
+  onPrdCreated?: () => void;
+  getSessionIdForPrd?: (prdName: string) => string | null;
 }
 
-export function useRalphPrds({ folderPath, onAutoSelectPrd }: UseRalphPrdsOptions) {
+export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSessionIdForPrd }: UseRalphPrdsOptions) {
   const store = useMessageStore();
   // Extract stable refs that don't change on every state update
-  const { hasAnyRunning, getStateRef, viewSession } = store;
+  const { hasAnyRunning, viewSession } = store;
 
   const [ralphPrds, setRalphPrds] = useState<string[]>([]);
   const [selectedRalphPrd, setSelectedRalphPrd] = useState<string | null>(null);
@@ -32,16 +34,17 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd }: UseRalphPrdsOption
 
   // Handle pending link when session ID becomes available
   useEffect(() => {
-    const viewedSessionId = store.state.activeSessionId;
+    if (!pendingLinkPrd || !folderPath) return;
 
-    if (pendingLinkPrd && viewedSessionId && !viewedSessionId.startsWith("__pending__") && folderPath) {
+    const sessionId = getSessionIdForPrd?.(pendingLinkPrd);
+    if (sessionId && !sessionId.startsWith("__pending__")) {
       invoke("save_ralph_link", {
         folderPath,
-        sessionId: viewedSessionId,
+        sessionId,
         prdFileName: pendingLinkPrd,
       })
         .then(() => {
-          setRalphLinkedSessionId(viewedSessionId);
+          setRalphLinkedSessionId(sessionId);
           setPendingLinkPrd(null);
         })
         .catch((err) => {
@@ -49,7 +52,7 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd }: UseRalphPrdsOption
           setPendingLinkPrd(null);
         });
     }
-  }, [pendingLinkPrd, store.state.activeSessionId, folderPath]);
+  }, [pendingLinkPrd, folderPath, getSessionIdForPrd]);
 
   // Define selectRalphPrd first since handleRalphPrdsChange depends on it
   const selectRalphPrd = useCallback(
@@ -122,17 +125,19 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd }: UseRalphPrdsOption
         if (added.length === 1 && removed.length === 0 && hasAnyRunning()) {
           selectRalphPrdRef.current?.(added[0], false);
           onAutoSelectPrd?.(added[0]);
-          // Link session to this PRD using the currently viewed session
-          const viewedSessionId = getStateRef().activeSessionId;
-          if (viewedSessionId && !viewedSessionId.startsWith("__pending__")) {
+          // Notify that a PRD was created (removes loading indicator)
+          onPrdCreated?.();
+          // Link session to this PRD - use the callback to get the correct session ID
+          const sessionId = getSessionIdForPrd?.(added[0]);
+          if (sessionId && !sessionId.startsWith("__pending__")) {
             // Session ID is already available, save link immediately
             invoke("save_ralph_link", {
               folderPath,
-              sessionId: viewedSessionId,
+              sessionId,
               prdFileName: added[0],
             })
               .then(() => {
-                setRalphLinkedSessionId(viewedSessionId);
+                setRalphLinkedSessionId(sessionId);
               })
               .catch(console.error);
           } else {
@@ -151,7 +156,7 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd }: UseRalphPrdsOption
         console.error("Failed to load ralph prds:", err);
       }
     },
-    [folderPath, hasAnyRunning, getStateRef, onAutoSelectPrd]
+    [folderPath, hasAnyRunning, onAutoSelectPrd, onPrdCreated, getSessionIdForPrd]
   );
 
   const clearSelection = useCallback(() => {

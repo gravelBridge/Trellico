@@ -6,9 +6,10 @@ import { useMessageStore } from "@/contexts";
 
 interface UsePlansOptions {
   folderPath: string | null;
+  onPlanCreated?: () => void;
 }
 
-export function usePlans({ folderPath }: UsePlansOptions) {
+export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
   const store = useMessageStore();
   // Extract stable refs that don't change on every state update
   const { hasAnyRunning, getStateRef, viewSession } = store;
@@ -162,6 +163,9 @@ export function usePlans({ folderPath }: UsePlansOptions) {
             const newPlan = added[0];
             selectPlanRef.current?.(newPlan, false);
 
+            // Notify that a plan was created (removes loading indicator)
+            onPlanCreated?.();
+
             // Link to current session using the currently viewed session
             const viewedSessionId = getStateRef().activeSessionId;
             if (viewedSessionId && !viewedSessionId.startsWith("__pending__")) {
@@ -201,7 +205,7 @@ export function usePlans({ folderPath }: UsePlansOptions) {
         console.error("Failed to load plans:", err);
       }
     },
-    [folderPath, reloadSelectedPlan, hasAnyRunning, getStateRef]
+    [folderPath, reloadSelectedPlan, hasAnyRunning, getStateRef, onPlanCreated]
   );
 
   const clearSelection = useCallback(() => {

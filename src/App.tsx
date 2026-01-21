@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
+import type { GeneratingItem } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -12,6 +13,7 @@ import { RalphPrdSplitView } from "@/components/RalphPrdSplitView";
 import { MessageList } from "@/components/MessageList";
 import { PromptInput } from "@/components/PromptInput";
 import { prdPrompt, ralphFormatPrompt } from "@/prompts";
+import { kebabToTitle } from "@/lib/formatting";
 
 function App() {
   // Folder state
@@ -22,6 +24,37 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState("plans");
   const [splitPosition, setSplitPosition] = useState(50);
+
+  // Generating items state (loading placeholders in sidebar)
+  const [generatingItems, setGeneratingItems] = useState<GeneratingItem[]>([]);
+  const [selectedGeneratingItemId, setSelectedGeneratingItemId] = useState<string | null>(null);
+
+  const addGeneratingItem = useCallback((item: Omit<GeneratingItem, "sessionId">) => {
+    const fullItem: GeneratingItem = {
+      ...item,
+      sessionId: `__pending__${item.id}`,
+    };
+    // Add to beginning so newest appears first
+    setGeneratingItems(prev => [fullItem, ...prev]);
+    // Auto-select the new generating item
+    setSelectedGeneratingItemId(item.id);
+  }, []);
+
+  const updateGeneratingItemSessionId = useCallback((processId: string, sessionId: string) => {
+    setGeneratingItems(prev => prev.map(item =>
+      item.id === processId ? { ...item, sessionId } : item
+    ));
+  }, []);
+
+  const removeGeneratingItemByType = useCallback((type: "plan" | "ralph_prd") => {
+    setGeneratingItems(prev => {
+      const idx = prev.findIndex(i => i.type === type);
+      if (idx === -1) return prev;
+      return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+    });
+    // Clear selection - the plan/prd is now created and will be auto-selected
+    setSelectedGeneratingItemId(null);
+  }, []);
 
   // Message store
   const store = useMessageStore();
@@ -59,6 +92,7 @@ function App() {
     handleSessionIdReceived: handlePlanSessionIdReceived,
   } = usePlans({
     folderPath,
+    onPlanCreated: useCallback(() => removeGeneratingItemByType("plan"), [removeGeneratingItemByType]),
   });
 
   // Ralph iterations hook (declared early for callback)
@@ -77,6 +111,20 @@ function App() {
     clearIterationSelectionRef.current();
   }, []);
 
+  // Ref to track generating items for session ID lookup (avoids callback recreation)
+  const generatingItemsRef = React.useRef(generatingItems);
+  useEffect(() => {
+    generatingItemsRef.current = generatingItems;
+  }, [generatingItems]);
+
+  // Callback to get session ID for a PRD by looking up the generating item
+  const getSessionIdForPrd = useCallback((prdName: string): string | null => {
+    const item = generatingItemsRef.current.find(
+      i => i.type === "ralph_prd" && i.targetName === prdName
+    );
+    return item?.sessionId ?? null;
+  }, []);
+
   // Ralph PRDs hook
   const {
     ralphPrds,
@@ -88,6 +136,8 @@ function App() {
   } = useRalphPrds({
     folderPath,
     onAutoSelectPrd: handleAutoSelectPrd,
+    onPrdCreated: useCallback(() => removeGeneratingItemByType("ralph_prd"), [removeGeneratingItemByType]),
+    getSessionIdForPrd,
   });
 
   // Update the refs with the current handlers
@@ -99,8 +149,9 @@ function App() {
     handleSessionIdReceivedRef.current = (processId: string, sessionId: string) => {
       handleRalphSessionIdReceived(processId, sessionId);
       handlePlanSessionIdReceived(processId, sessionId);
+      updateGeneratingItemSessionId(processId, sessionId);
     };
-  }, [handleRalphSessionIdReceived, handlePlanSessionIdReceived]);
+  }, [handleRalphSessionIdReceived, handlePlanSessionIdReceived, updateGeneratingItemSessionId]);
 
   // Handle start ralphing
   function handleStartRalphing() {
@@ -140,6 +191,10 @@ function App() {
     // Select the PRD (loads content for split view, but skip history - iteration will load its own)
     selectRalphPrd(prdName, false);
     ralphIterations.selectIteration(prdName, iterationNumber);
+    // Only clear generating item selection if it's a ralph_prd type
+    if (getSelectedGeneratingItemType() === "ralph_prd") {
+      setSelectedGeneratingItemId(null);
+    }
     setActiveTab("ralph");
     resetAutoScroll();
   }
@@ -173,7 +228,16 @@ function App() {
 
     try {
       // Pass the user's message to display (always show what the user typed)
-      await runClaude(fullMessage, folderPath, store.state.activeSessionId, message);
+      const processId = await runClaude(fullMessage, folderPath, store.state.activeSessionId, message);
+
+      // Add generating item for new plan sessions
+      if (isNewSession && activeTab === "plans" && processId) {
+        addGeneratingItem({
+          id: processId,
+          displayName: message.trim(),
+          type: "plan",
+        });
+      }
     } catch {
       // Error already handled in hook
     }
@@ -185,7 +249,10 @@ function App() {
     store.clearView();
     setMessage("");
     clearPlanSelection();
-    clearRalphSelection();
+    // Only clear generating item selection if it's a plan type
+    if (getSelectedGeneratingItemType() === "plan") {
+      setSelectedGeneratingItemId(null);
+    }
     setSplitPosition(50);
   }
 
@@ -208,14 +275,33 @@ function App() {
     // Start Claude session (no user message shown - the prompt is hidden)
     resetAutoScroll();
 
-    runClaude(fullMessage, folderPath, null).catch(() => {
+    runClaude(fullMessage, folderPath, null).then((processId) => {
+      if (processId) {
+        addGeneratingItem({
+          id: processId,
+          displayName: `Converting ${kebabToTitle(planFileName)}...`,
+          type: "ralph_prd",
+          targetName: planFileName,
+        });
+      }
+    }).catch(() => {
       // Error already handled in hook
     });
   }
 
+  // Helper to get the type of the currently selected generating item
+  const getSelectedGeneratingItemType = () => {
+    if (!selectedGeneratingItemId) return null;
+    return generatingItems.find(i => i.id === selectedGeneratingItemId)?.type ?? null;
+  };
+
   // Handle plan selection
   function handleSelectPlan(planName: string) {
     selectPlan(planName);
+    // Only clear generating item selection if it's a plan type
+    if (getSelectedGeneratingItemType() === "plan") {
+      setSelectedGeneratingItemId(null);
+    }
     setActiveTab("plans");
     resetAutoScroll();
   }
@@ -224,6 +310,10 @@ function App() {
   function handleSelectRalphPrd(prdName: string) {
     ralphIterations.clearIterationSelection();
     selectRalphPrd(prdName);
+    // Only clear generating item selection if it's a ralph_prd type
+    if (getSelectedGeneratingItemType() === "ralph_prd") {
+      setSelectedGeneratingItemId(null);
+    }
     setActiveTab("ralph");
     resetAutoScroll();
   }
@@ -234,11 +324,74 @@ function App() {
     handleSelectRalphPrd(selectedPlan);
   }
 
+  // Handle selecting a generating item (view its in-progress session)
+  function handleSelectGeneratingItem(item: GeneratingItem) {
+    // Use the stored sessionId from the item (persists even after process ends)
+    const sessionId = item.sessionId;
+    if (sessionId) {
+      // Only clear selections within the same tab
+      if (item.type === "plan") {
+        clearPlanSelection();
+      } else {
+        clearRalphSelection();
+        ralphIterations.clearIterationSelection();
+      }
+      setSelectedGeneratingItemId(item.id);
+      // View the running session (or its cached messages if still running)
+      // For completed sessions, try to load from store's running sessions first
+      const runningMessages = store.getRunningSessionMessages(sessionId);
+      if (runningMessages) {
+        store.viewSession(sessionId);
+      } else {
+        // Process has ended - load session history from disk
+        invoke<import("@/types").ClaudeMessage[]>("load_session_history", {
+          folderPath,
+          sessionId,
+        }).then((history) => {
+          store.viewSession(sessionId, history);
+        }).catch(() => {
+          // Session might not exist yet or failed - just view empty
+          store.viewSession(sessionId, []);
+        });
+      }
+      // Switch to appropriate tab
+      setActiveTab(item.type === "plan" ? "plans" : "ralph");
+      resetAutoScroll();
+    }
+  }
+
   // Handle tab change (preserve selections, reload session history)
   function handleTabChange(tab: string) {
     setActiveTab(tab);
     // Reset auto-scroll so we scroll to bottom when messages load
     resetAutoScroll();
+
+    // Check if a generating item for this tab is selected
+    const selectedGeneratingItem = generatingItems.find(i => i.id === selectedGeneratingItemId);
+    const generatingItemMatchesTab = selectedGeneratingItem && (
+      (tab === "plans" && selectedGeneratingItem.type === "plan") ||
+      (tab === "ralph" && selectedGeneratingItem.type === "ralph_prd")
+    );
+
+    if (generatingItemMatchesTab && selectedGeneratingItem) {
+      // Reload the generating item's session
+      const sessionId = selectedGeneratingItem.sessionId;
+      const runningMessages = store.getRunningSessionMessages(sessionId);
+      if (runningMessages) {
+        store.viewSession(sessionId);
+      } else {
+        invoke<import("@/types").ClaudeMessage[]>("load_session_history", {
+          folderPath,
+          sessionId,
+        }).then((history) => {
+          store.viewSession(sessionId, history);
+        }).catch(() => {
+          store.viewSession(sessionId, []);
+        });
+      }
+      return;
+    }
+
     // Reload the session history for the selected item in the target tab
     if (tab === "plans") {
       if (selectedPlan) {
@@ -288,6 +441,10 @@ function App() {
         ralphIterations={ralphIterations.iterations}
         selectedRalphIteration={ralphIterations.selectedIteration}
         onSelectRalphIteration={handleSelectRalphIteration}
+        generatingPlans={generatingItems.filter(i => i.type === "plan")}
+        generatingRalphPrds={generatingItems.filter(i => i.type === "ralph_prd")}
+        onSelectGeneratingItem={handleSelectGeneratingItem}
+        selectedGeneratingItemId={selectedGeneratingItemId}
       />
 
       {/* Main content */}

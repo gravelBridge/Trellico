@@ -20,7 +20,7 @@ pub fn list_plans(folder_path: String) -> Result<Vec<String>, String> {
         return Ok(vec![]);
     }
 
-    let mut plans = Vec::new();
+    let mut plans_with_time: Vec<(String, std::time::SystemTime)> = Vec::new();
     let entries = fs::read_dir(&plans_path)
         .map_err(|e| format!("Failed to read plans directory: {}", e))?;
 
@@ -29,14 +29,19 @@ pub fn list_plans(folder_path: String) -> Result<Vec<String>, String> {
         if path.is_file() && path.extension().is_some_and(|ext| ext == "md") {
             if let Some(stem) = path.file_stem() {
                 if let Some(name) = stem.to_str() {
-                    plans.push(name.to_string());
+                    let modified = path
+                        .metadata()
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::UNIX_EPOCH);
+                    plans_with_time.push((name.to_string(), modified));
                 }
             }
         }
     }
 
-    plans.sort();
-    Ok(plans)
+    // Sort by modification time, newest first
+    plans_with_time.sort_by(|a, b| b.1.cmp(&a.1));
+    Ok(plans_with_time.into_iter().map(|(name, _)| name).collect())
 }
 
 #[tauri::command]
