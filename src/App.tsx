@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { useAutoScroll, useClaudeSession, usePlans, useRalphPrds, useRalphIterations } from "@/hooks";
 import { useMessageStore, useFolderContext } from "@/contexts";
-import { FolderSelection } from "@/components/FolderSelection";
+import { Welcome } from "@/components/Welcome";
 import { Sidebar } from "@/components/Sidebar";
 import { EmptyState } from "@/components/EmptyState";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -609,9 +609,9 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [folders, setActiveFolder]);
 
-  // Render folder selection screen
+  // Render welcome screen
   if (!folderPath) {
-    return <FolderSelection onSelectFolder={selectFolder} />;
+    return <Welcome onSelectFolder={selectFolder} />;
   }
 
   // Render main layout

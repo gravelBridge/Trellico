@@ -1,10 +1,10 @@
 import { useState } from "react";
 
-interface FolderSelectionProps {
+interface WelcomeProps {
   onSelectFolder: () => void;
 }
 
-export function FolderSelection({ onSelectFolder }: FolderSelectionProps) {
+export function Welcome({ onSelectFolder }: WelcomeProps) {
   const [isHovered, setIsHovered] = useState(false);
 
   return (
