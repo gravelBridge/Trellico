@@ -105,7 +105,7 @@ export function MessageItem({ message: msg, index }: MessageItemProps) {
         return null;
       }
       return (
-        <div key={index} className="text-sm bg-primary/10 rounded-lg px-3 py-2 select-text">
+        <div key={index} className="text-sm bg-primary/10 rounded-lg px-3 py-2 select-text whitespace-pre-wrap">
           {displayContent}
         </div>
       );
