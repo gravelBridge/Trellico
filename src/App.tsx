@@ -288,7 +288,7 @@ function App() {
             inputValue={message}
             onInputChange={setMessage}
             onSubmit={handleSubmit}
-            onStop={stopClaude}
+            onStop={() => stopClaude()}
             isRunning={isViewingRunning}
             linkedSessionId={linkedSessionId}
             sidebarOpen={sidebarOpen}
@@ -323,12 +323,12 @@ function App() {
             isViewingIteration={ralphIterations.selectedIteration !== null}
             iterations={ralphIterations.iterations[selectedRalphPrd] || []}
           />
-        ) : (activeTab === "plans" && !selectedPlan) || (activeTab === "ralph" && !selectedRalphPrd) ? (
+        ) : ((activeTab === "plans" && !selectedPlan) || (activeTab === "ralph" && !selectedRalphPrd)) && !store.state.activeSessionId ? (
           <EmptyState
             inputValue={message}
             onInputChange={setMessage}
             onSubmit={handleSubmit}
-            onStop={stopClaude}
+            onStop={() => stopClaude()}
             isRunning={isViewingRunning}
             activeTab={activeTab}
           />
@@ -364,7 +364,7 @@ function App() {
                   value={message}
                   onChange={setMessage}
                   onSubmit={handleSubmit}
-                  onStop={stopClaude}
+                  onStop={() => stopClaude()}
                   isRunning={isViewingRunning}
                   placeholder={store.state.activeSessionId ? "Follow up..." : "Ask anything..."}
                   rows={3}

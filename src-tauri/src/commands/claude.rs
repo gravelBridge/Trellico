@@ -168,6 +168,8 @@ fn run_claude_process(
     loop {
         // Check if stop was requested
         if stop_flag.load(Ordering::SeqCst) {
+            // Kill the child process
+            let _ = child.kill();
             break;
         }
 
