@@ -65,12 +65,7 @@ pub fn get_ralph_iterations(
     prd_name: String,
 ) -> Result<Vec<RalphIteration>, String> {
     let iterations_path = ralph_iterations_path(&folder_path);
-
-    if !iterations_path.exists() {
-        return Ok(vec![]);
-    }
-
-    let store: RalphIterationsStore = read_json(&iterations_path)?;
+    let store: RalphIterationsStore = read_json_or_default(&iterations_path);
     Ok(store.iterations.get(&prd_name).cloned().unwrap_or_default())
 }
 
@@ -79,12 +74,7 @@ pub fn get_all_ralph_iterations(
     folder_path: String,
 ) -> Result<HashMap<String, Vec<RalphIteration>>, String> {
     let iterations_path = ralph_iterations_path(&folder_path);
-
-    if !iterations_path.exists() {
-        return Ok(HashMap::new());
-    }
-
-    let store: RalphIterationsStore = read_json(&iterations_path)?;
+    let store: RalphIterationsStore = read_json_or_default(&iterations_path);
     Ok(store.iterations)
 }
 

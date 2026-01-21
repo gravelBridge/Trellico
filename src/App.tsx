@@ -93,11 +93,25 @@ function App() {
     resetAutoScroll();
   }
 
-  // Handle stop (combines stopClaude and stopRalphing)
+  // Handle stop - stops only the currently viewed session
   function handleStop() {
-    stopClaude();
-    if (ralphIterations.isRalphing) {
-      ralphIterations.stopRalphing();
+    if (!isViewingRunning) return;
+
+    // Find the processId for the viewed session and stop only that one
+    const activeSessionId = store.state.activeSessionId;
+    if (activeSessionId) {
+      const processId = store.getSessionProcessId(activeSessionId);
+      if (processId) {
+        stopClaude(processId);
+      }
+    }
+
+    // Only stop ralphing if the viewed session is the current ralphing iteration
+    if (ralphIterations.isRalphing && ralphIterations.currentProcessId) {
+      const ralphSessionId = store.getProcessSessionId(ralphIterations.currentProcessId);
+      if (ralphSessionId === activeSessionId) {
+        ralphIterations.stopRalphing();
+      }
     }
   }
 

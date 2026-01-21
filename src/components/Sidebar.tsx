@@ -188,7 +188,7 @@ export function Sidebar({
                         className={cn(
                           "w-full text-left px-2 py-1.5 text-sm rounded-md transition-colors truncate",
                           selectedPlan === plan
-                            ? "bg-muted text-foreground"
+                            ? "bg-primary/15 text-foreground font-medium"
                             : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                         )}
                       >
@@ -226,7 +226,7 @@ export function Sidebar({
                                 "flex-1 text-left py-1.5 text-sm rounded-md transition-colors truncate",
                                 hasIterations ? "px-1" : "px-2",
                                 isPrdSelected
-                                  ? "bg-muted text-foreground"
+                                  ? "bg-primary/15 text-foreground font-medium"
                                   : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                               )}
                             >
@@ -246,7 +246,7 @@ export function Sidebar({
                                     className={cn(
                                       "w-full text-left px-2 py-1 text-xs rounded-md transition-colors flex items-center gap-2",
                                       isIterSelected
-                                        ? "bg-muted text-foreground"
+                                        ? "bg-primary/15 text-foreground font-medium"
                                         : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                                     )}
                                   >

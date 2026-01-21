@@ -243,6 +243,18 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
     [store]
   );
 
+  // Reverse lookup: sessionId -> processId
+  const getSessionProcessId = useCallback(
+    (sessionId: string) => {
+      const processes = store.getState().runningProcesses;
+      for (const [processId, sid] of Object.entries(processes)) {
+        if (sid === sessionId) return processId;
+      }
+      return null;
+    },
+    [store]
+  );
+
   // Check if a session is running
   const isSessionRunning = useCallback(
     (sessionId: string | null) => {
@@ -279,6 +291,7 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
     getStateRef,
     getViewedMessagesRef,
     getProcessSessionId,
+    getSessionProcessId,
     getRunningSessionMessages,
   };
 

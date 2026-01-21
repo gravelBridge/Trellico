@@ -36,6 +36,7 @@ export interface MessageStoreContextValue {
   // Convenience getters
   getViewedMessagesRef: () => ClaudeMessage[];
   getProcessSessionId: (processId: string) => string | null;
+  getSessionProcessId: (sessionId: string) => string | null;
   getRunningSessionMessages: (sessionId: string) => ClaudeMessage[] | null;
 }
 
