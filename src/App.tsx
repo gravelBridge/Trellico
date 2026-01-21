@@ -53,6 +53,21 @@ function App() {
     folderPath,
   });
 
+  // Ralph iterations hook (declared early for callback)
+  const ralphIterations = useRalphIterations({
+    folderPath,
+    runClaude,
+  });
+
+  // Stable callback for auto-select (uses ref pattern to avoid dependency on ralphIterations)
+  const clearIterationSelectionRef = React.useRef(ralphIterations.clearIterationSelection);
+  useEffect(() => {
+    clearIterationSelectionRef.current = ralphIterations.clearIterationSelection;
+  }, [ralphIterations.clearIterationSelection]);
+  const handleAutoSelectPrd = useCallback(() => {
+    clearIterationSelectionRef.current();
+  }, []);
+
   // Ralph PRDs hook
   const {
     ralphPrds,
@@ -63,13 +78,7 @@ function App() {
     clearSelection: clearRalphSelection,
   } = useRalphPrds({
     folderPath,
-    activeTab,
-  });
-
-  // Ralph iterations hook
-  const ralphIterations = useRalphIterations({
-    folderPath,
-    runClaude,
+    onAutoSelectPrd: handleAutoSelectPrd,
   });
 
   // Update the ref with the current handleClaudeExit
@@ -274,7 +283,24 @@ function App() {
               showScrollbar={showScrollbar}
               onScroll={handleScroll}
             />
-            <div className="select-none border-t">
+            <div className="select-none border-t relative">
+              {isViewingRunning && (
+                <div className="absolute top-0 left-0 right-0 h-0.5 overflow-hidden z-10">
+                  <div
+                    className="h-full w-1/3"
+                    style={{
+                      background: "linear-gradient(90deg, transparent, #f97316, #fb923c, #f97316, transparent)",
+                      animation: "flowAnimation 1.5s ease-in-out infinite",
+                    }}
+                  />
+                  <style>{`
+                    @keyframes flowAnimation {
+                      0% { transform: translateX(-100%); }
+                      100% { transform: translateX(400%); }
+                    }
+                  `}</style>
+                </div>
+              )}
               <form onSubmit={handleSubmit} className="max-w-3xl w-full mx-auto px-6 py-6">
                 <PromptInput
                   value={message}

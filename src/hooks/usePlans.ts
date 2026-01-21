@@ -10,6 +10,8 @@ interface UsePlansOptions {
 
 export function usePlans({ folderPath }: UsePlansOptions) {
   const store = useMessageStore();
+  // Extract stable refs that don't change on every state update
+  const { hasAnyRunning, getStateRef, viewSession } = store;
 
   const [plans, setPlans] = useState<string[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
@@ -89,8 +91,8 @@ export function usePlans({ folderPath }: UsePlansOptions) {
           } else {
             setLinkedSessionId(null);
             // Don't clear session if we're in the middle of creating a plan
-            if (!store.hasAnyRunning()) {
-              store.viewSession(null);
+            if (!hasAnyRunning()) {
+              viewSession(null);
             }
           }
         } catch (err) {
@@ -99,7 +101,7 @@ export function usePlans({ folderPath }: UsePlansOptions) {
         }
       }
     },
-    [folderPath, store]
+    [folderPath, store, hasAnyRunning, viewSession]
   );
 
   // Keep selectPlanRef in sync (needed for file watcher callback stability)
@@ -164,12 +166,12 @@ export function usePlans({ folderPath }: UsePlansOptions) {
         // Detect new plan created (while Claude is running = auto-select)
         if (added.length === 1 && removed.length === 0) {
           // Use synchronous getter - always returns current value
-          if (store.hasAnyRunning()) {
+          if (hasAnyRunning()) {
             const newPlan = added[0];
             selectPlanRef.current?.(newPlan, false);
 
             // Link to current session using the currently viewed session
-            const viewedSessionId = store.state.viewedSessionId;
+            const viewedSessionId = getStateRef().viewedSessionId;
             if (viewedSessionId && !viewedSessionId.startsWith("__pending__")) {
               // Session ID is already available, save link immediately
               invoke("save_session_link", {
@@ -207,7 +209,7 @@ export function usePlans({ folderPath }: UsePlansOptions) {
         console.error("Failed to load plans:", err);
       }
     },
-    [folderPath, reloadSelectedPlan, store]
+    [folderPath, reloadSelectedPlan, hasAnyRunning, getStateRef]
   );
 
   const clearSelection = useCallback(() => {

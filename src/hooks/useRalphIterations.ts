@@ -264,18 +264,24 @@ export function useRalphIterations({
           }
         }
       } else if (iteration.session_id) {
-        // Load historical session
-        try {
-          const history = await invoke<ClaudeMessage[]>("load_session_history", {
-            folderPath,
-            sessionId: iteration.session_id,
-          });
-          // Skip the first user message (the hidden prompt)
-          const filteredHistory =
-            history.length > 0 && history[0].type === "user" ? history.slice(1) : history;
-          store.viewSession(iteration.session_id, filteredHistory);
-        } catch (err) {
-          console.error("Failed to load session history:", err);
+        // Check if this session has an active process running (e.g., user sent a follow-up message)
+        // If so, just view the in-memory session without overwriting with historical data
+        if (store.isSessionRunning(iteration.session_id)) {
+          store.viewSession(iteration.session_id);
+        } else {
+          // Load historical session
+          try {
+            const history = await invoke<ClaudeMessage[]>("load_session_history", {
+              folderPath,
+              sessionId: iteration.session_id,
+            });
+            // Skip the first user message (the hidden prompt)
+            const filteredHistory =
+              history.length > 0 && history[0].type === "user" ? history.slice(1) : history;
+            store.viewSession(iteration.session_id, filteredHistory);
+          } catch (err) {
+            console.error("Failed to load session history:", err);
+          }
         }
       }
     },

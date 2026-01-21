@@ -6,11 +6,13 @@ import { useMessageStore } from "@/contexts";
 
 interface UseRalphPrdsOptions {
   folderPath: string | null;
-  activeTab: string;
+  onAutoSelectPrd?: (prdName: string) => void;
 }
 
-export function useRalphPrds({ folderPath, activeTab }: UseRalphPrdsOptions) {
+export function useRalphPrds({ folderPath, onAutoSelectPrd }: UseRalphPrdsOptions) {
   const store = useMessageStore();
+  // Extract stable refs that don't change on every state update
+  const { hasAnyRunning, getStateRef, viewSession } = store;
 
   const [ralphPrds, setRalphPrds] = useState<string[]>([]);
   const [selectedRalphPrd, setSelectedRalphPrd] = useState<string | null>(null);
@@ -21,14 +23,9 @@ export function useRalphPrds({ folderPath, activeTab }: UseRalphPrdsOptions) {
   const prevRalphPrdsRef = useRef<string[]>([]);
   const ralphPrdsDebounceRef = useRef<number | null>(null);
   const selectedRalphPrdRef = useRef<string | null>(null);
-  const activeTabRef = useRef(activeTab);
   const selectRalphPrdRef = useRef<((prdName: string, autoLoadHistory?: boolean) => Promise<void>) | null>(null);
 
   // Keep refs in sync
-  useEffect(() => {
-    activeTabRef.current = activeTab;
-  }, [activeTab]);
-
   useEffect(() => {
     selectedRalphPrdRef.current = selectedRalphPrd;
   }, [selectedRalphPrd]);
@@ -85,11 +82,11 @@ export function useRalphPrds({ folderPath, activeTab }: UseRalphPrdsOptions) {
             // Skip the first user message (the hidden prompt)
             const filteredHistory =
               history.length > 0 && history[0].type === "user" ? history.slice(1) : history;
-            store.viewSession(link.session_id, filteredHistory);
+            viewSession(link.session_id, filteredHistory);
           } else {
             setRalphLinkedSessionId(null);
-            if (!store.hasAnyRunning()) {
-              store.viewSession(null);
+            if (!hasAnyRunning()) {
+              viewSession(null);
             }
           }
         } catch (err) {
@@ -97,7 +94,7 @@ export function useRalphPrds({ folderPath, activeTab }: UseRalphPrdsOptions) {
         }
       }
     },
-    [folderPath, store]
+    [folderPath, hasAnyRunning, viewSession]
   );
 
   // Keep selectRalphPrdRef in sync (needed for file watcher callback stability)
@@ -122,15 +119,11 @@ export function useRalphPrds({ folderPath, activeTab }: UseRalphPrdsOptions) {
         if (isInitialLoad) return;
 
         // Auto-select newly created PRD if Claude is running (creating it)
-        if (
-          added.length === 1 &&
-          removed.length === 0 &&
-          store.hasAnyRunning() &&
-          activeTabRef.current === "ralph"
-        ) {
+        if (added.length === 1 && removed.length === 0 && hasAnyRunning()) {
           selectRalphPrdRef.current?.(added[0], false);
+          onAutoSelectPrd?.(added[0]);
           // Link session to this PRD using the currently viewed session
-          const viewedSessionId = store.state.viewedSessionId;
+          const viewedSessionId = getStateRef().viewedSessionId;
           if (viewedSessionId && !viewedSessionId.startsWith("__pending__")) {
             // Session ID is already available, save link immediately
             invoke("save_ralph_link", {
@@ -158,7 +151,7 @@ export function useRalphPrds({ folderPath, activeTab }: UseRalphPrdsOptions) {
         console.error("Failed to load ralph prds:", err);
       }
     },
-    [folderPath, store]
+    [folderPath, hasAnyRunning, getStateRef, onAutoSelectPrd]
   );
 
   const clearSelection = useCallback(() => {

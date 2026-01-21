@@ -4,6 +4,26 @@ import { MessageList } from "./MessageList";
 import { PromptInput } from "./PromptInput";
 import { cn } from "@/lib/utils";
 
+function FlowingIndicator() {
+  return (
+    <div className="absolute -top-px left-0 right-0 h-0.5 overflow-hidden z-10">
+      <div
+        className="h-full w-1/3"
+        style={{
+          background: "linear-gradient(90deg, transparent, #f97316, #fb923c, #f97316, transparent)",
+          animation: "flowAnimation 1.5s ease-in-out infinite",
+        }}
+      />
+      <style>{`
+        @keyframes flowAnimation {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(400%); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 interface ChatPanelProps {
   messages: ClaudeMessage[];
   scrollRef: RefObject<HTMLDivElement | null>;
@@ -50,7 +70,8 @@ export function ChatPanel({
             onScroll={onScroll}
             className="px-4 pt-4"
           />
-          <div className="select-none border-t p-4">
+          <div className="select-none border-t p-4 relative">
+            {isRunning && <FlowingIndicator />}
             <PromptInput
               value={inputValue}
               onChange={onInputChange}
