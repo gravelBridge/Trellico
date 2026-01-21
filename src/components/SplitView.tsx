@@ -70,23 +70,23 @@ export function SplitView({
 
   return (
     <div ref={containerRef} className="flex-1 flex overflow-hidden">
-      {/* Left panel */}
-      {!leftHidden && (
-        <div
-          className="flex flex-col overflow-hidden"
-          style={
-            rightHidden
+      {/* Left panel - hidden with CSS to preserve state */}
+      <div
+        className={cn("flex flex-col overflow-hidden", leftHidden && "hidden")}
+        style={
+          leftHidden
+            ? undefined
+            : rightHidden
               ? { flex: 1 }
               : {
                   flexBasis: `${splitPosition}%`,
                   flexShrink: 0,
                   flexGrow: 0,
                 }
-          }
-        >
-          {leftPanel}
-        </div>
-      )}
+        }
+      >
+        {leftPanel}
+      </div>
 
       {/* Resize divider */}
       <div
@@ -100,12 +100,15 @@ export function SplitView({
         <div className="resize-handle" />
       </div>
 
-      {/* Right panel */}
-      {!rightHidden && (
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {rightPanel}
-        </div>
-      )}
+      {/* Right panel - hidden with CSS to preserve state */}
+      <div
+        className={cn(
+          "flex-1 flex flex-col overflow-hidden",
+          rightHidden && "hidden"
+        )}
+      >
+        {rightPanel}
+      </div>
     </div>
   );
 }
