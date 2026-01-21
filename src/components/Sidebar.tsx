@@ -4,6 +4,13 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { kebabToTitle } from "@/lib/formatting";
 import type { RalphIteration, GeneratingItem } from "@/types";
+import { FolderSelector } from "./FolderSelector";
+
+interface FolderOption {
+  path: string;
+  name: string;
+  isRunning: boolean;
+}
 
 interface SidebarProps {
   isOpen: boolean;
@@ -18,8 +25,6 @@ interface SidebarProps {
   selectedRalphPrd: string | null;
   onSelectRalphPrd: (prd: string) => void;
   folderPath: string;
-  onChangeFolder: () => void;
-  isRunning: boolean;
   ralphIterations: Record<string, RalphIteration[]>;
   selectedRalphIteration: { prd: string; iteration: number } | null;
   onSelectRalphIteration: (prd: string, iteration: number) => void;
@@ -27,6 +32,12 @@ interface SidebarProps {
   generatingRalphPrds: GeneratingItem[];
   onSelectGeneratingItem: (item: GeneratingItem) => void;
   selectedGeneratingItemId: string | null;
+  // Multi-folder props
+  folders: FolderOption[];
+  activeFolderPath: string | null;
+  onSelectFolder: (path: string) => void;
+  onCloseFolder: (path: string) => void;
+  onAddFolder: () => void;
 }
 
 function SidebarToggleIcon() {
@@ -100,8 +111,6 @@ export function Sidebar({
   selectedRalphPrd,
   onSelectRalphPrd,
   folderPath,
-  onChangeFolder,
-  isRunning,
   ralphIterations,
   selectedRalphIteration,
   onSelectRalphIteration,
@@ -109,6 +118,11 @@ export function Sidebar({
   generatingRalphPrds,
   onSelectGeneratingItem,
   selectedGeneratingItemId,
+  folders,
+  activeFolderPath,
+  onSelectFolder,
+  onCloseFolder,
+  onAddFolder,
 }: SidebarProps) {
   const [expandedPrds, setExpandedPrds] = useState<Set<string>>(new Set());
   const [prevIterationsKeys, setPrevIterationsKeys] = useState<string[]>([]);
@@ -167,6 +181,14 @@ export function Sidebar({
               <SidebarToggleIcon />
             </button>
           </div>
+          {/* Folder selector */}
+          <FolderSelector
+            folders={folders}
+            activeFolderPath={activeFolderPath}
+            onSelectFolder={onSelectFolder}
+            onCloseFolder={onCloseFolder}
+            onAddFolder={onAddFolder}
+          />
           <div className="px-2">
             <Tabs value={activeTab} onValueChange={onTabChange} className="w-full">
               <TabsList className="w-full">
@@ -315,13 +337,10 @@ export function Sidebar({
               </TabsContent>
             </Tabs>
           </div>
-          <div className="mt-auto px-4 py-2 border-t">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium truncate">{folderPath.split("/").pop()}</span>
-              <Button variant="ghost" size="sm" onClick={onChangeFolder} disabled={isRunning}>
-                Change
-              </Button>
-            </div>
+          <div className="mt-auto px-3 py-2 border-t">
+            <span className="text-xs text-muted-foreground truncate block" title={folderPath}>
+              {folderPath}
+            </span>
           </div>
         </div>
       </aside>

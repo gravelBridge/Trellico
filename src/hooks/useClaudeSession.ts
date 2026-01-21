@@ -153,7 +153,7 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
       });
 
       // Start live session in store
-      store.startProcess(processId, sessionId ?? undefined);
+      store.startProcess(processId, folderPath, sessionId ?? undefined);
 
       // Add the user message to display
       if (userMessageToShow) {

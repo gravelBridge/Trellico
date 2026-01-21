@@ -35,7 +35,8 @@ pub fn run() {
             commands::ralph::save_ralph_iteration,
             commands::ralph::update_ralph_iteration_status,
             commands::ralph::update_ralph_iteration_session_id,
-            commands::watchers::watch_ralph_iterations
+            commands::watchers::watch_ralph_iterations,
+            commands::watchers::stop_watching_folder
         ])
         .setup(|app| {
             let main_window = app.get_webview_window("main").unwrap();

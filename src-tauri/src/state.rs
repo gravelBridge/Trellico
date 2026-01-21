@@ -7,13 +7,27 @@ use std::sync::{Arc, LazyLock, Mutex};
 pub static CLAUDE_PROCESSES: LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-// File watchers
-pub static PLANS_WATCHER: Mutex<Option<RecommendedWatcher>> = Mutex::new(None);
-pub static RALPH_ITERATIONS_WATCHER: Mutex<Option<RecommendedWatcher>> = Mutex::new(None);
-pub static RALPH_PRD_WATCHER: Mutex<Option<RecommendedWatcher>> = Mutex::new(None);
+// Per-folder watchers and known files tracking
+pub struct FolderWatchers {
+    pub plans_watcher: Option<RecommendedWatcher>,
+    pub ralph_prd_watcher: Option<RecommendedWatcher>,
+    pub ralph_iterations_watcher: Option<RecommendedWatcher>,
+    pub known_plans: HashSet<String>,
+    pub known_ralph_prds: HashSet<String>,
+}
 
-// Known files tracking for change detection
-pub static KNOWN_PLANS: LazyLock<Mutex<HashSet<String>>> =
-    LazyLock::new(|| Mutex::new(HashSet::new()));
-pub static KNOWN_RALPH_PRDS: LazyLock<Mutex<HashSet<String>>> =
-    LazyLock::new(|| Mutex::new(HashSet::new()));
+impl Default for FolderWatchers {
+    fn default() -> Self {
+        Self {
+            plans_watcher: None,
+            ralph_prd_watcher: None,
+            ralph_iterations_watcher: None,
+            known_plans: HashSet::new(),
+            known_ralph_prds: HashSet::new(),
+        }
+    }
+}
+
+// Map of folder_path -> FolderWatchers
+pub static FOLDER_WATCHERS: LazyLock<Mutex<HashMap<String, FolderWatchers>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));

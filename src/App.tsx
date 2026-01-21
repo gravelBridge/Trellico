@@ -1,13 +1,14 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
 import type { GeneratingItem } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 
 import { useAutoScroll, useClaudeSession, usePlans, useRalphPrds, useRalphIterations } from "@/hooks";
-import { useMessageStore } from "@/contexts";
+import { useMessageStore, useFolderContext } from "@/contexts";
 import { FolderSelection } from "@/components/FolderSelection";
 import { Sidebar } from "@/components/Sidebar";
 import { EmptyState } from "@/components/EmptyState";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { PlanSplitView } from "@/components/PlanSplitView";
 import { RalphPrdSplitView } from "@/components/RalphPrdSplitView";
 import { MessageList } from "@/components/MessageList";
@@ -16,18 +17,56 @@ import { prdPrompt, ralphFormatPrompt } from "@/prompts";
 import { kebabToTitle } from "@/lib/formatting";
 
 function App() {
-  // Folder state
-  const [folderPath, setFolderPath] = useState<string | null>(null);
+  // Folder context for multi-folder support
+  const folderContext = useFolderContext();
+  const {
+    folders,
+    activeFolderPath,
+    activeFolder,
+    addFolder,
+    removeFolder,
+    setActiveFolder,
+    setActiveTab: setFolderActiveTab,
+    setSplitPosition: setFolderSplitPosition,
+    setGeneratingItems,
+    setSelectedGeneratingItemId,
+    setSelectedPlan: setFolderSelectedPlan,
+    setSelectedRalphPrd: setFolderSelectedRalphPrd,
+    setSelectedRalphIteration: setFolderSelectedRalphIteration,
+  } = folderContext;
+
+  // Get current folder state with defaults
+  const folderPath = activeFolderPath;
+  const activeTab = activeFolder?.activeTab ?? "plans";
+  const splitPosition = activeFolder?.splitPosition ?? 50;
+  const generatingItems = useMemo(
+    () => activeFolder?.generatingItems ?? [],
+    [activeFolder?.generatingItems]
+  );
+  const selectedGeneratingItemId = activeFolder?.selectedGeneratingItemId ?? null;
+  const savedSelectedPlan = activeFolder?.selectedPlan ?? null;
+  const savedSelectedRalphPrd = activeFolder?.selectedRalphPrd ?? null;
+  const savedSelectedRalphIteration = activeFolder?.selectedRalphIteration ?? null;
+
+  // Track previous folder path for detecting folder switches
+  const prevFolderPathRef = React.useRef<string | null>(null);
 
   // UI state
   const [message, setMessage] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState("plans");
-  const [splitPosition, setSplitPosition] = useState(50);
+  const [closeFolderDialog, setCloseFolderDialog] = useState<{ isOpen: boolean; path: string | null }>({
+    isOpen: false,
+    path: null,
+  });
 
-  // Generating items state (loading placeholders in sidebar)
-  const [generatingItems, setGeneratingItems] = useState<GeneratingItem[]>([]);
-  const [selectedGeneratingItemId, setSelectedGeneratingItemId] = useState<string | null>(null);
+  // Wrapper functions for local state setters that update folder context
+  const setActiveTab = useCallback((tab: string) => {
+    setFolderActiveTab(tab as "plans" | "ralph");
+  }, [setFolderActiveTab]);
+
+  const setSplitPosition = useCallback((position: number) => {
+    setFolderSplitPosition(position);
+  }, [setFolderSplitPosition]);
 
   const addGeneratingItem = useCallback((item: Omit<GeneratingItem, "sessionId">) => {
     const fullItem: GeneratingItem = {
@@ -38,13 +77,13 @@ function App() {
     setGeneratingItems(prev => [fullItem, ...prev]);
     // Auto-select the new generating item
     setSelectedGeneratingItemId(item.id);
-  }, []);
+  }, [setGeneratingItems, setSelectedGeneratingItemId]);
 
   const updateGeneratingItemSessionId = useCallback((processId: string, sessionId: string) => {
     setGeneratingItems(prev => prev.map(item =>
       item.id === processId ? { ...item, sessionId } : item
     ));
-  }, []);
+  }, [setGeneratingItems]);
 
   const removeGeneratingItemByType = useCallback((type: "plan" | "ralph_prd") => {
     setGeneratingItems(prev => {
@@ -54,7 +93,7 @@ function App() {
     });
     // Clear selection - the plan/prd is now created and will be auto-selected
     setSelectedGeneratingItemId(null);
-  }, []);
+  }, [setGeneratingItems, setSelectedGeneratingItemId]);
 
   // Message store
   const store = useMessageStore();
@@ -99,7 +138,7 @@ function App() {
   const ralphIterations = useRalphIterations({
     folderPath,
     runClaude,
-    onAutoSelectIteration: useCallback(() => setActiveTab("ralph"), []),
+    onAutoSelectIteration: useCallback(() => setActiveTab("ralph"), [setActiveTab]),
   });
 
   // Stable callback for auto-select (uses ref pattern to avoid dependency on ralphIterations)
@@ -152,6 +191,109 @@ function App() {
       updateGeneratingItemSessionId(processId, sessionId);
     };
   }, [handleRalphSessionIdReceived, handlePlanSessionIdReceived, updateGeneratingItemSessionId]);
+
+  // Sync hook selections to FolderContext (save state when selections change)
+  useEffect(() => {
+    if (folderPath) {
+      setFolderSelectedPlan(selectedPlan);
+    }
+  }, [folderPath, selectedPlan, setFolderSelectedPlan]);
+
+  useEffect(() => {
+    if (folderPath) {
+      setFolderSelectedRalphPrd(selectedRalphPrd);
+    }
+  }, [folderPath, selectedRalphPrd, setFolderSelectedRalphPrd]);
+
+  useEffect(() => {
+    if (folderPath) {
+      setFolderSelectedRalphIteration(ralphIterations.selectedIteration);
+    }
+  }, [folderPath, ralphIterations.selectedIteration, setFolderSelectedRalphIteration]);
+
+  // Refs for restore functions to avoid stale closures
+  const selectPlanRef = React.useRef(selectPlan);
+  const selectRalphPrdRef = React.useRef(selectRalphPrd);
+  const selectIterationRef = React.useRef(ralphIterations.selectIteration);
+  const clearPlanSelectionRef = React.useRef(clearPlanSelection);
+  const clearRalphSelectionRef = React.useRef(clearRalphSelection);
+  const storeRef = React.useRef(store);
+  const resetAutoScrollRef = React.useRef(resetAutoScroll);
+
+  useEffect(() => {
+    selectPlanRef.current = selectPlan;
+    selectRalphPrdRef.current = selectRalphPrd;
+    selectIterationRef.current = ralphIterations.selectIteration;
+    clearPlanSelectionRef.current = clearPlanSelection;
+    clearRalphSelectionRef.current = clearRalphSelection;
+    storeRef.current = store;
+    resetAutoScrollRef.current = resetAutoScroll;
+  }, [selectPlan, selectRalphPrd, ralphIterations.selectIteration, clearPlanSelection, clearRalphSelection, store, resetAutoScroll]);
+
+  // Restore selections when switching folders
+  useEffect(() => {
+    const prevPath = prevFolderPathRef.current;
+    const didFolderChange = prevPath !== null && prevPath !== folderPath;
+    prevFolderPathRef.current = folderPath;
+
+    // Only run restore logic when folder actually changes (not on other dep changes)
+    if (!didFolderChange || !folderPath) return;
+
+    // Track if effect is still active for async cleanup
+    let isActive = true;
+
+    // Folder changed - restore saved state immediately (hooks clear state synchronously now)
+    // Check if a generating item is selected
+    if (selectedGeneratingItemId) {
+      const item = generatingItems.find(i => i.id === selectedGeneratingItemId);
+      if (item?.sessionId) {
+        // Load the generating item's session
+        const sessionId = item.sessionId;
+        const runningMessages = storeRef.current.getRunningSessionMessages(sessionId);
+        if (runningMessages) {
+          storeRef.current.viewSession(sessionId);
+        } else {
+          invoke<import("@/types").ClaudeMessage[]>("load_session_history", {
+            folderPath,
+            sessionId,
+          }).then((history) => {
+            if (isActive) {
+              storeRef.current.viewSession(sessionId, history);
+            }
+          }).catch(() => {
+            if (isActive) {
+              storeRef.current.viewSession(sessionId, []);
+            }
+          });
+        }
+        resetAutoScrollRef.current();
+        return;
+      }
+    }
+
+    if (savedSelectedRalphIteration) {
+      // Restore ralph iteration selection (loads PRD content and iteration session)
+      selectRalphPrdRef.current(savedSelectedRalphIteration.prd, false);
+      selectIterationRef.current(savedSelectedRalphIteration.prd, savedSelectedRalphIteration.iteration);
+    } else if (savedSelectedRalphPrd && activeTab === "ralph") {
+      // Restore ralph PRD selection (loads PRD content and session)
+      selectRalphPrdRef.current(savedSelectedRalphPrd);
+    } else if (savedSelectedPlan && activeTab === "plans") {
+      // Restore plan selection (loads plan content and session)
+      selectPlanRef.current(savedSelectedPlan);
+    } else {
+      // Nothing selected - clear everything but preserve the active tab
+      clearPlanSelectionRef.current();
+      clearRalphSelectionRef.current();
+      clearIterationSelectionRef.current();
+      storeRef.current.viewSession(null);
+    }
+    resetAutoScrollRef.current();
+
+    return () => {
+      isActive = false;
+    };
+  }, [folderPath, selectedGeneratingItemId, generatingItems, savedSelectedRalphIteration, savedSelectedRalphPrd, savedSelectedPlan, activeTab]);
 
   // Handle start ralphing
   function handleStartRalphing() {
@@ -208,8 +350,34 @@ function App() {
 
     if (selected) {
       await invoke("setup_folder", { folderPath: selected });
-      setFolderPath(selected);
+      addFolder(selected);
     }
+  }
+
+  // Handle closing a folder
+  async function handleCloseFolder(path: string) {
+    // Check if folder has running processes
+    if (store.hasFolderRunning(path)) {
+      // Show warning dialog
+      setCloseFolderDialog({ isOpen: true, path });
+      return;
+    }
+    // Stop watching the folder
+    await invoke("stop_watching_folder", { folderPath: path });
+    removeFolder(path);
+  }
+
+  // Force close a folder (stops all running processes)
+  async function forceCloseFolder(path: string) {
+    // Stop all running processes in this folder
+    const processes = store.getFolderProcesses(path);
+    for (const processId of processes) {
+      await stopClaude(processId);
+    }
+    // Stop watching the folder
+    await invoke("stop_watching_folder", { folderPath: path });
+    removeFolder(path);
+    setCloseFolderDialog({ isOpen: false, path: null });
   }
 
   // Handle message submission
@@ -415,6 +583,30 @@ function App() {
     }
   }
 
+  // Build folder tabs data
+  const folderTabs = folders.map(f => ({
+    path: f.path,
+    name: f.path.split("/").pop() || f.path,
+    isRunning: store.hasFolderRunning(f.path),
+  }));
+
+  // Keyboard shortcuts for folder switching (Cmd+1/2/3/...)
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Only handle Cmd+1-9 for folder switching
+      if ((e.metaKey || e.ctrlKey) && e.key >= "1" && e.key <= "9") {
+        const index = parseInt(e.key, 10) - 1;
+        if (index < folders.length) {
+          e.preventDefault();
+          setActiveFolder(folders[index].path);
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [folders, setActiveFolder]);
+
   // Render folder selection screen
   if (!folderPath) {
     return <FolderSelection onSelectFolder={selectFolder} />;
@@ -436,8 +628,6 @@ function App() {
         selectedRalphPrd={selectedRalphPrd}
         onSelectRalphPrd={handleSelectRalphPrd}
         folderPath={folderPath}
-        onChangeFolder={selectFolder}
-        isRunning={store.hasAnyRunning()}
         ralphIterations={ralphIterations.iterations}
         selectedRalphIteration={ralphIterations.selectedIteration}
         onSelectRalphIteration={handleSelectRalphIteration}
@@ -445,6 +635,12 @@ function App() {
         generatingRalphPrds={generatingItems.filter(i => i.type === "ralph_prd")}
         onSelectGeneratingItem={handleSelectGeneratingItem}
         selectedGeneratingItemId={selectedGeneratingItemId}
+        // Multi-folder props
+        folders={folderTabs}
+        activeFolderPath={activeFolderPath}
+        onSelectFolder={setActiveFolder}
+        onCloseFolder={handleCloseFolder}
+        onAddFolder={selectFolder}
       />
 
       {/* Main content */}
@@ -548,6 +744,22 @@ function App() {
           </>
         )}
       </div>
+
+      {/* Close folder confirmation dialog */}
+      <ConfirmDialog
+        isOpen={closeFolderDialog.isOpen}
+        title="Close folder?"
+        message="This folder has running processes. Closing it will stop all running processes. Are you sure?"
+        confirmLabel="Close"
+        cancelLabel="Cancel"
+        variant="destructive"
+        onConfirm={() => {
+          if (closeFolderDialog.path) {
+            forceCloseFolder(closeFolderDialog.path);
+          }
+        }}
+        onCancel={() => setCloseFolderDialog({ isOpen: false, path: null })}
+      />
     </main>
   );
 }

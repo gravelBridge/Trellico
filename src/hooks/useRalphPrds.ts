@@ -22,10 +22,24 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
   const [ralphLinkedSessionId, setRalphLinkedSessionId] = useState<string | null>(null);
   const [pendingLinkPrd, setPendingLinkPrd] = useState<string | null>(null);
 
+  // Track previous folder path to detect folder switches and clear state synchronously
+  const [prevFolderPath, setPrevFolderPath] = useState<string | null>(folderPath);
+
   const prevRalphPrdsRef = useRef<string[]>([]);
   const ralphPrdsDebounceRef = useRef<number | null>(null);
   const selectedRalphPrdRef = useRef<string | null>(null);
   const selectRalphPrdRef = useRef<((prdName: string, autoLoadHistory?: boolean) => Promise<void>) | null>(null);
+
+  // Clear state synchronously when folder changes (React pattern for adjusting state based on props)
+  // Refs will be synced by existing useEffects
+  if (folderPath !== prevFolderPath) {
+    setPrevFolderPath(folderPath);
+    setRalphPrds([]);
+    setSelectedRalphPrd(null);
+    setRalphPrdContent(null);
+    setRalphLinkedSessionId(null);
+    setPendingLinkPrd(null);
+  }
 
   // Keep refs in sync
   useEffect(() => {
@@ -186,10 +200,8 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
   useEffect(() => {
     if (!folderPath) return;
 
-    // Initial load - deferred to microtask to avoid synchronous setState in effect
-    queueMicrotask(() => {
-      handleRalphPrdsChange(true);
-    });
+    // Initial load (deferred to avoid synchronous setState in effect)
+    queueMicrotask(() => handleRalphPrdsChange(true));
 
     // Start watching for file changes
     invoke("watch_ralph_prds", { folderPath }).catch((err) => {
@@ -198,7 +210,10 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
 
     // Listener for ralph PRD changes
     let unlisten: UnlistenFn | null = null;
-    listen("ralph-prd-changed", () => {
+    listen<{ folder_path: string }>("ralph-prd-changed", (event) => {
+      // Only process events for the current folder
+      if (event.payload.folder_path !== folderPath) return;
+
       if (ralphPrdsDebounceRef.current) {
         clearTimeout(ralphPrdsDebounceRef.current);
       }

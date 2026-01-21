@@ -4,7 +4,7 @@ import { MessageStoreContext, type MessageStoreState, type MessageStoreContextVa
 
 // Action types
 type MessageAction =
-  | { type: "START_PROCESS"; processId: string; sessionId?: string }
+  | { type: "START_PROCESS"; processId: string; folderPath: string; sessionId?: string }
   | { type: "SET_LIVE_SESSION_ID"; sessionId: string; processId: string }
   | { type: "END_PROCESS"; processId: string }
   | { type: "ADD_MESSAGE"; message: ClaudeMessage; processId: string }
@@ -33,7 +33,10 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
         ...state,
         runningProcesses: {
           ...state.runningProcesses,
-          [action.processId]: sessionId,
+          [action.processId]: {
+            sessionId,
+            folderPath: action.folderPath,
+          },
         },
         runningSessions: {
           ...state.runningSessions,
@@ -45,11 +48,13 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
     }
 
     case "SET_LIVE_SESSION_ID": {
-      const oldSessionId = state.runningProcesses[action.processId];
-      if (!oldSessionId || oldSessionId === action.sessionId) {
+      const processInfo = state.runningProcesses[action.processId];
+      if (!processInfo || processInfo.sessionId === action.sessionId) {
         // Session ID unchanged or process not found
         return state;
       }
+
+      const oldSessionId = processInfo.sessionId;
 
       // Migrate messages from pending session to real session
       const pendingMessages = state.runningSessions[oldSessionId] || [];
@@ -60,10 +65,13 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
         ...pendingMessages,
       ];
 
-      // Update the process mapping
+      // Update the process mapping (keep the same folderPath)
       const newRunningProcesses = {
         ...state.runningProcesses,
-        [action.processId]: action.sessionId,
+        [action.processId]: {
+          ...processInfo,
+          sessionId: action.sessionId,
+        },
       };
 
       // If we're viewing the old (pending) session, switch to the new session ID
@@ -79,14 +87,14 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
     }
 
     case "END_PROCESS": {
-      const sessionId = state.runningProcesses[action.processId];
+      const processInfo = state.runningProcesses[action.processId];
       const remainingProcesses = { ...state.runningProcesses };
       delete remainingProcesses[action.processId];
 
       // Remove from runningSessions (messages are persisted to disk by Claude)
       const newRunningSessions = { ...state.runningSessions };
-      if (sessionId) {
-        delete newRunningSessions[sessionId];
+      if (processInfo?.sessionId) {
+        delete newRunningSessions[processInfo.sessionId];
       }
 
       return {
@@ -97,8 +105,10 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
     }
 
     case "ADD_MESSAGE": {
-      const sessionId = state.runningProcesses[action.processId];
-      if (!sessionId) return state;
+      const processInfo = state.runningProcesses[action.processId];
+      if (!processInfo) return state;
+
+      const sessionId = processInfo.sessionId;
 
       // Always add to runningSessions so messages accumulate even when not viewed
       const newRunningSessions = {
@@ -184,8 +194,8 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
 
   // Actions
   const startProcess = useCallback(
-    (processId: string, sessionId?: string) => {
-      store.dispatch({ type: "START_PROCESS", processId, sessionId });
+    (processId: string, folderPath: string, sessionId?: string) => {
+      store.dispatch({ type: "START_PROCESS", processId, folderPath, sessionId });
     },
     [store]
   );
@@ -231,7 +241,14 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
 
   const getProcessSessionId = useCallback(
     (processId: string) => {
-      return store.getState().runningProcesses[processId] || null;
+      return store.getState().runningProcesses[processId]?.sessionId || null;
+    },
+    [store]
+  );
+
+  const getProcessFolderPath = useCallback(
+    (processId: string) => {
+      return store.getState().runningProcesses[processId]?.folderPath || null;
     },
     [store]
   );
@@ -247,8 +264,8 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
   const getSessionProcessId = useCallback(
     (sessionId: string) => {
       const processes = store.getState().runningProcesses;
-      for (const [processId, sid] of Object.entries(processes)) {
-        if (sid === sessionId) return processId;
+      for (const [processId, info] of Object.entries(processes)) {
+        if (info.sessionId === sessionId) return processId;
       }
       return null;
     },
@@ -260,7 +277,7 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
     (sessionId: string | null) => {
       if (!sessionId) return false;
       const s = store.getState();
-      return Object.values(s.runningProcesses).includes(sessionId);
+      return Object.values(s.runningProcesses).some((info) => info.sessionId === sessionId);
     },
     [store]
   );
@@ -270,10 +287,30 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
     return Object.keys(store.getState().runningProcesses).length > 0;
   }, [store]);
 
+  // Check if a folder has any running processes
+  const hasFolderRunning = useCallback(
+    (folderPath: string) => {
+      const processes = store.getState().runningProcesses;
+      return Object.values(processes).some((info) => info.folderPath === folderPath);
+    },
+    [store]
+  );
+
+  // Get all process IDs running in a folder
+  const getFolderProcesses = useCallback(
+    (folderPath: string) => {
+      const processes = store.getState().runningProcesses;
+      return Object.entries(processes)
+        .filter(([, info]) => info.folderPath === folderPath)
+        .map(([processId]) => processId);
+    },
+    [store]
+  );
+
   // Derived values for rendering
   const viewedMessages = state.messages;
   const isViewingRunningSession = state.activeSessionId
-    ? Object.values(state.runningProcesses).includes(state.activeSessionId)
+    ? Object.values(state.runningProcesses).some((info) => info.sessionId === state.activeSessionId)
     : false;
 
   const value: MessageStoreContextValue = {
@@ -282,6 +319,8 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
     isViewingRunningSession,
     isSessionRunning,
     hasAnyRunning,
+    hasFolderRunning,
+    getFolderProcesses,
     startProcess,
     setLiveSessionId,
     endProcess,
@@ -291,6 +330,7 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
     getStateRef,
     getViewedMessagesRef,
     getProcessSessionId,
+    getProcessFolderPath,
     getSessionProcessId,
     getRunningSessionMessages,
   };

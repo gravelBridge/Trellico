@@ -20,12 +20,26 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
   const [linkedSessionId, setLinkedSessionId] = useState<string | null>(null);
   const [pendingLinkPlan, setPendingLinkPlan] = useState<string | null>(null);
 
+  // Track previous folder path to detect folder switches and clear state synchronously
+  const [prevFolderPath, setPrevFolderPath] = useState<string | null>(folderPath);
+
   const selectedPlanRef = useRef<string | null>(null);
   const prevPlansRef = useRef<string[]>([]);
   const plansDebounceRef = useRef<number | null>(null);
   const selectPlanRef = useRef<((planName: string, autoLoadHistory?: boolean) => Promise<void>) | null>(null);
   const pendingLinkPlanRef = useRef<string | null>(null);
   const folderPathRef = useRef<string | null>(null);
+
+  // Clear state synchronously when folder changes (React pattern for adjusting state based on props)
+  // Refs will be synced by existing useEffects
+  if (folderPath !== prevFolderPath) {
+    setPrevFolderPath(folderPath);
+    setPlans([]);
+    setSelectedPlan(null);
+    setPlanContent(null);
+    setLinkedSessionId(null);
+    setPendingLinkPlan(null);
+  }
 
   // Keep refs in sync
   useEffect(() => {
@@ -219,10 +233,8 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
   useEffect(() => {
     if (!folderPath) return;
 
-    // Initial load - deferred to microtask to avoid synchronous setState in effect
-    queueMicrotask(() => {
-      handlePlansChange(true);
-    });
+    // Initial load (deferred to avoid synchronous setState in effect)
+    queueMicrotask(() => handlePlansChange(true));
 
     // Start watching for file changes
     invoke("watch_plans", { folderPath }).catch((err) => {
@@ -231,7 +243,10 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
 
     // Single listener for all plan changes - debounced to let filesystem settle
     let unlisten: UnlistenFn | null = null;
-    listen("plans-changed", () => {
+    listen<{ folder_path: string }>("plans-changed", (event) => {
+      // Only process events for the current folder
+      if (event.payload.folder_path !== folderPath) return;
+
       // Debounce: wait for filesystem events to settle
       if (plansDebounceRef.current) {
         clearTimeout(plansDebounceRef.current);

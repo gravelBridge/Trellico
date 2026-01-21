@@ -42,4 +42,23 @@ pub struct PlanChangeEvent {
     pub change_type: String, // "created" | "modified" | "removed" | "renamed"
     pub file_name: String,
     pub old_file_name: Option<String>,
+    pub folder_path: String,
+}
+
+// Ralph PRD change event type
+#[derive(serde::Serialize, Clone)]
+pub struct RalphPrdChangeEvent {
+    pub folder_path: String,
+}
+
+// Ralph iterations change event type
+#[derive(serde::Serialize, Clone)]
+pub struct RalphIterationsChangeEvent {
+    pub folder_path: String,
+}
+
+// Plans changed event type (general refresh event)
+#[derive(serde::Serialize, Clone)]
+pub struct PlansChangedEvent {
+    pub folder_path: String,
 }

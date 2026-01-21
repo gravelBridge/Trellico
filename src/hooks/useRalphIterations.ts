@@ -75,9 +75,21 @@ export function useRalphIterations({
     iteration: number;
   } | null>(null);
 
+  // Track previous folder path to detect folder switches and clear state synchronously
+  const [prevFolderPath, setPrevFolderPath] = useState<string | null>(folderPath);
+
   // Ref for the current ralph state - needed for async callbacks
   // This is the ONLY ref we need, and it's kept in sync with ralphState
   const ralphStateRef = useRef<RalphStatus>({ status: "idle" });
+
+  // Clear state synchronously when folder changes (React pattern for adjusting state based on props)
+  // Refs will be synced by existing useEffects
+  if (folderPath !== prevFolderPath) {
+    setPrevFolderPath(folderPath);
+    setIterations({});
+    setSelectedIteration(null);
+    setRalphState({ status: "idle" });
+  }
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -111,10 +123,8 @@ export function useRalphIterations({
   useEffect(() => {
     if (!folderPath) return;
 
-    // Initial load - deferred to microtask to avoid synchronous setState in effect
-    queueMicrotask(() => {
-      loadAllIterations();
-    });
+    // Initial load (deferred to avoid synchronous setState in effect)
+    queueMicrotask(() => loadAllIterations());
 
     // Start watching the iterations file
     invoke("watch_ralph_iterations", { folderPath }).catch((err) => {
@@ -123,7 +133,10 @@ export function useRalphIterations({
 
     // Listen for iterations file changes
     let unlisten: UnlistenFn | null = null;
-    listen("ralph-iterations-changed", () => {
+    listen<{ folder_path: string }>("ralph-iterations-changed", (event) => {
+      // Only process events for the current folder
+      if (event.payload.folder_path !== folderPath) return;
+
       // Debounce the reload
       if (reloadDebounceRef.current) {
         clearTimeout(reloadDebounceRef.current);
