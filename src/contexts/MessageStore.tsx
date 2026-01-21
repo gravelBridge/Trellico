@@ -24,15 +24,16 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
   switch (action.type) {
     case "START_PROCESS": {
       const sessionId = action.sessionId || `${PENDING_PREFIX}${action.processId}`;
+      // If continuing the same session, preserve messages; otherwise clear them
+      const isContinuingSession = action.sessionId && action.sessionId === state.activeSessionId;
       return {
         ...state,
         runningProcesses: {
           ...state.runningProcesses,
           [action.processId]: sessionId,
         },
-        // Switch to viewing this new session, clear old messages
         activeSessionId: sessionId,
-        messages: [],
+        messages: isContinuingSession ? state.messages : [],
       };
     }
 
