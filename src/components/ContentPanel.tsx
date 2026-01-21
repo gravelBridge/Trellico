@@ -2,6 +2,7 @@ import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
 import { cn } from "@/lib/utils";
 import { JsonViewer } from "./JsonViewer";
+import { RalphPrdViewer } from "./RalphPrdViewer";
 
 interface ContentPanelProps {
   title: string;
@@ -9,6 +10,7 @@ interface ContentPanelProps {
   contentType: "markdown" | "json";
   headerActions?: React.ReactNode;
   rightPanelNeedsPadding?: boolean;
+  isRalphPrd?: boolean;
 }
 
 export function ContentPanel({
@@ -17,6 +19,7 @@ export function ContentPanel({
   contentType,
   headerActions,
   rightPanelNeedsPadding = false,
+  isRalphPrd = false,
 }: ContentPanelProps) {
   return (
     <div className="flex flex-col h-full">
@@ -40,6 +43,8 @@ export function ContentPanel({
               {content}
             </Streamdown>
           </div>
+        ) : isRalphPrd ? (
+          <RalphPrdViewer content={content} />
         ) : (
           <JsonViewer content={content} />
         )}

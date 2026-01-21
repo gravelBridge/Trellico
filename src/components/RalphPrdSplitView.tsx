@@ -106,6 +106,7 @@ export function RalphPrdSplitView({
           content={ralphPrdContent}
           contentType="json"
           rightPanelNeedsPadding={rightPanelNeedsPadding}
+          isRalphPrd
           headerActions={
             !isViewingIteration ? (
               <Button
