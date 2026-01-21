@@ -2,7 +2,7 @@ import React, { useCallback, useState, useSyncExternalStore } from "react";
 import type { ClaudeMessage } from "@/types";
 import { MessageStoreContext, type MessageStoreState, type MessageStoreContextValue } from "./MessageStoreContext";
 
-// Action types - simplified for single-session cache
+// Action types
 type MessageAction =
   | { type: "START_PROCESS"; processId: string; sessionId?: string }
   | { type: "SET_LIVE_SESSION_ID"; sessionId: string; processId: string }
@@ -15,6 +15,7 @@ const initialState: MessageStoreState = {
   activeSessionId: null,
   messages: [],
   runningProcesses: {},
+  runningSessions: {},
 };
 
 // Temporary session ID for sessions that haven't received their ID yet
@@ -24,36 +25,40 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
   switch (action.type) {
     case "START_PROCESS": {
       const sessionId = action.sessionId || `${PENDING_PREFIX}${action.processId}`;
-      // If continuing the same session, preserve messages; otherwise clear them
-      const isContinuingSession = action.sessionId && action.sessionId === state.activeSessionId;
+      // If continuing the same session, preserve messages from runningSessions or current
+      const existingMessages = state.runningSessions[sessionId] ||
+        (action.sessionId === state.activeSessionId ? state.messages : []);
+
       return {
         ...state,
         runningProcesses: {
           ...state.runningProcesses,
           [action.processId]: sessionId,
         },
+        runningSessions: {
+          ...state.runningSessions,
+          [sessionId]: existingMessages,
+        },
         activeSessionId: sessionId,
-        messages: isContinuingSession ? state.messages : [],
+        messages: existingMessages,
       };
     }
 
     case "SET_LIVE_SESSION_ID": {
       const oldSessionId = state.runningProcesses[action.processId];
-      if (!oldSessionId) {
-        // Process not found, just update the mapping
-        return {
-          ...state,
-          runningProcesses: {
-            ...state.runningProcesses,
-            [action.processId]: action.sessionId,
-          },
-        };
-      }
-
-      if (oldSessionId === action.sessionId) {
-        // Session ID unchanged
+      if (!oldSessionId || oldSessionId === action.sessionId) {
+        // Session ID unchanged or process not found
         return state;
       }
+
+      // Migrate messages from pending session to real session
+      const pendingMessages = state.runningSessions[oldSessionId] || [];
+      const newRunningSessions = { ...state.runningSessions };
+      delete newRunningSessions[oldSessionId];
+      newRunningSessions[action.sessionId] = [
+        ...(newRunningSessions[action.sessionId] || []),
+        ...pendingMessages,
+      ];
 
       // Update the process mapping
       const newRunningProcesses = {
@@ -62,22 +67,32 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
       };
 
       // If we're viewing the old (pending) session, switch to the new session ID
-      const newActiveSessionId =
-        state.activeSessionId === oldSessionId ? action.sessionId : state.activeSessionId;
+      const isViewingPending = state.activeSessionId === oldSessionId;
 
       return {
         ...state,
         runningProcesses: newRunningProcesses,
-        activeSessionId: newActiveSessionId,
+        runningSessions: newRunningSessions,
+        activeSessionId: isViewingPending ? action.sessionId : state.activeSessionId,
+        messages: isViewingPending ? newRunningSessions[action.sessionId] : state.messages,
       };
     }
 
     case "END_PROCESS": {
+      const sessionId = state.runningProcesses[action.processId];
       const remainingProcesses = { ...state.runningProcesses };
       delete remainingProcesses[action.processId];
+
+      // Remove from runningSessions (messages are persisted to disk by Claude)
+      const newRunningSessions = { ...state.runningSessions };
+      if (sessionId) {
+        delete newRunningSessions[sessionId];
+      }
+
       return {
         ...state,
         runningProcesses: remainingProcesses,
+        runningSessions: newRunningSessions,
       };
     }
 
@@ -85,27 +100,52 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
       const sessionId = state.runningProcesses[action.processId];
       if (!sessionId) return state;
 
-      // Only add message if it's for the currently viewed session
-      if (sessionId !== state.activeSessionId) return state;
+      // Always add to runningSessions so messages accumulate even when not viewed
+      const newRunningSessions = {
+        ...state.runningSessions,
+        [sessionId]: [...(state.runningSessions[sessionId] || []), action.message],
+      };
+
+      // Also update messages if this is the active session
+      const newMessages = sessionId === state.activeSessionId
+        ? [...state.messages, action.message]
+        : state.messages;
 
       return {
         ...state,
-        messages: [...state.messages, action.message],
+        runningSessions: newRunningSessions,
+        messages: newMessages,
       };
     }
 
-    case "VIEW_SESSION":
-      // Switch to viewing a different session
-      // If messages are provided, use them (for loading historical sessions)
-      // Otherwise just switch the session ID (for viewing a running session)
+    case "VIEW_SESSION": {
+      if (action.sessionId === null) {
+        return {
+          ...state,
+          activeSessionId: null,
+          messages: [],
+        };
+      }
+
+      // If viewing a running session, use its cached messages
+      const runningMessages = state.runningSessions[action.sessionId];
+      if (runningMessages !== undefined) {
+        return {
+          ...state,
+          activeSessionId: action.sessionId,
+          messages: runningMessages,
+        };
+      }
+
+      // Otherwise use provided messages (for historical sessions loaded from disk)
       return {
         ...state,
         activeSessionId: action.sessionId,
         messages: action.messages ?? [],
       };
+    }
 
     case "CLEAR_VIEW":
-      // Clear the current view (for starting new conversations)
       return {
         ...state,
         activeSessionId: null,
@@ -196,6 +236,13 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
     [store]
   );
 
+  const getRunningSessionMessages = useCallback(
+    (sessionId: string) => {
+      return store.getState().runningSessions[sessionId] || null;
+    },
+    [store]
+  );
+
   // Check if a session is running
   const isSessionRunning = useCallback(
     (sessionId: string | null) => {
@@ -232,6 +279,7 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
     getStateRef,
     getViewedMessagesRef,
     getProcessSessionId,
+    getRunningSessionMessages,
   };
 
   return <MessageStoreContext.Provider value={value}>{children}</MessageStoreContext.Provider>;

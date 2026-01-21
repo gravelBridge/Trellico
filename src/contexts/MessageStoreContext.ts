@@ -1,14 +1,16 @@
 import { createContext } from "react";
 import type { ClaudeMessage } from "@/types";
 
-// Simplified state shape - only cache the currently viewed session
+// State shape - cache running sessions so they accumulate in background
 export interface MessageStoreState {
   // Currently viewed session ID
   activeSessionId: string | null;
-  // Messages for the active session only (not all sessions)
+  // Messages for the active session (derived from runningSessions or loaded from disk)
   messages: ClaudeMessage[];
   // All running processes: processId -> sessionId (for tracking what's running)
   runningProcesses: Record<string, string>;
+  // Messages for all running sessions (so they accumulate even when not viewed)
+  runningSessions: Record<string, ClaudeMessage[]>;
 }
 
 // Context value type
@@ -34,6 +36,7 @@ export interface MessageStoreContextValue {
   // Convenience getters
   getViewedMessagesRef: () => ClaudeMessage[];
   getProcessSessionId: (processId: string) => string | null;
+  getRunningSessionMessages: (sessionId: string) => ClaudeMessage[] | null;
 }
 
 export const MessageStoreContext = createContext<MessageStoreContextValue | null>(null);
