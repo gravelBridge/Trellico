@@ -361,6 +361,11 @@ export function useRalphIterations({
       const currentState = ralphStateRef.current;
       if (currentState.status !== "running") return;
 
+      // Only handle exit for the current ralph iteration's process
+      // Other Claude sessions (e.g., follow-ups in other iterations) should be ignored
+      const ralphSessionId = store.getProcessSessionId(currentState.processId);
+      if (sessionId !== ralphSessionId) return;
+
       const { prdName, iterationNumber } = currentState;
 
       if (!folderPath) return;
@@ -437,7 +442,7 @@ export function useRalphIterations({
         setRalphState({ status: "idle" });
       }
     },
-    [folderPath, runClaude, onAutoSelectIteration]
+    [folderPath, runClaude, onAutoSelectIteration, store]
   );
 
   return {

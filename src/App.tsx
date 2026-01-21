@@ -328,10 +328,7 @@ function App() {
 
   // Handle select ralph iteration
   function handleSelectRalphIteration(prdName: string, iterationNumber: number) {
-    // Stop current ralphing if switching to a different PRD or iteration
-    if (ralphIterations.isRalphing && ralphIterations.ralphingPrd !== prdName) {
-      ralphIterations.stopRalphing();
-    }
+    // Just view the iteration - don't stop any running iteration
     // Select the PRD (loads content for split view, but skip history - iteration will load its own)
     selectRalphPrd(prdName, false);
     ralphIterations.selectIteration(prdName, iterationNumber);
