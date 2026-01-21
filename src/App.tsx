@@ -240,8 +240,13 @@ function App() {
     // Reset auto-scroll so we scroll to bottom when messages load
     resetAutoScroll();
     // Reload the session history for the selected item in the target tab
-    if (tab === "plans" && selectedPlan) {
-      selectPlan(selectedPlan);
+    if (tab === "plans") {
+      if (selectedPlan) {
+        selectPlan(selectedPlan);
+      } else {
+        // No plan selected - clear view so EmptyState shows
+        store.viewSession(null);
+      }
     } else if (tab === "ralph") {
       const iteration = ralphIterations.selectedIteration;
       if (iteration) {
@@ -250,6 +255,9 @@ function App() {
       } else if (selectedRalphPrd) {
         // Reload PRD's session
         selectRalphPrd(selectedRalphPrd);
+      } else {
+        // No PRD selected - clear view so EmptyState shows
+        store.viewSession(null);
       }
     }
   }
