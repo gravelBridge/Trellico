@@ -492,6 +492,7 @@ function App() {
             ralphingPrd={ralphIterations.ralphingPrd}
             isViewingIteration={ralphIterations.selectedIteration !== null}
             iterations={ralphIterations.iterations[selectedRalphPrd] || []}
+            selectedIterationNumber={ralphIterations.selectedIteration?.iteration ?? null}
           />
         ) : ((activeTab === "plans" && !selectedPlan) || (activeTab === "ralph" && !selectedRalphPrd)) && !store.state.activeSessionId ? (
           <EmptyState
