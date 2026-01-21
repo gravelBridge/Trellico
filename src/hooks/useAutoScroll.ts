@@ -51,10 +51,20 @@ export function useAutoScroll(messages: ClaudeMessage[]) {
     shouldAutoScroll.current = true;
   }, []);
 
+  const scrollToBottom = useCallback(() => {
+    shouldAutoScroll.current = true;
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    });
+  }, []);
+
   return {
     scrollRef,
     showScrollbar,
     handleScroll,
     resetAutoScroll,
+    scrollToBottom,
   };
 }

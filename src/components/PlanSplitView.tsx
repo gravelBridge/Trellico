@@ -22,6 +22,8 @@ interface PlanSplitViewProps {
   splitPosition: number;
   onSplitChange: (pos: number) => void;
   onCreateRalphSession: () => void;
+  ralphPrds: string[];
+  onViewRalphSession: () => void;
 }
 
 export function PlanSplitView({
@@ -41,7 +43,10 @@ export function PlanSplitView({
   splitPosition,
   onSplitChange,
   onCreateRalphSession,
+  ralphPrds,
+  onViewRalphSession,
 }: PlanSplitViewProps) {
+  const hasExistingRalphPrd = ralphPrds.includes(selectedPlan);
   // Right panel needs padding when sidebar is closed AND left panel is nearly collapsed
   const leftPanelCollapsed = splitPosition < 6;
   const rightPanelNeedsPadding = !sidebarOpen && leftPanelCollapsed;
@@ -71,9 +76,15 @@ export function PlanSplitView({
           contentType="markdown"
           rightPanelNeedsPadding={rightPanelNeedsPadding}
           headerActions={
-            <Button size="sm" onClick={onCreateRalphSession} disabled={isRunning}>
-              Create Ralph Session
-            </Button>
+            hasExistingRalphPrd ? (
+              <Button size="sm" onClick={onViewRalphSession}>
+                View Ralph Session
+              </Button>
+            ) : (
+              <Button size="sm" onClick={onCreateRalphSession} disabled={isRunning}>
+                Create Ralph Session
+              </Button>
+            )
           }
         />
       }

@@ -23,7 +23,6 @@ interface SidebarProps {
   ralphIterations: Record<string, RalphIteration[]>;
   selectedRalphIteration: { prd: string; iteration: number } | null;
   onSelectRalphIteration: (prd: string, iteration: number) => void;
-  ralphingPrd: string | null;
 }
 
 function SidebarToggleIcon() {
@@ -96,17 +95,23 @@ export function Sidebar({
   ralphIterations,
   selectedRalphIteration,
   onSelectRalphIteration,
-  ralphingPrd,
 }: SidebarProps) {
   const [expandedPrds, setExpandedPrds] = useState<Set<string>>(new Set());
-  const [prevRalphingPrd, setPrevRalphingPrd] = useState<string | null>(null);
+  const [prevIterationsKeys, setPrevIterationsKeys] = useState<string[]>([]);
 
-  // Auto-expand PRD when ralphing starts (React pattern for syncing with props)
-  if (ralphingPrd !== prevRalphingPrd) {
-    setPrevRalphingPrd(ralphingPrd);
-    if (ralphingPrd && !expandedPrds.has(ralphingPrd)) {
+  // Auto-expand PRDs when they get iterations (React pattern for syncing with props)
+  const currentKeys = Object.keys(ralphIterations).filter(
+    (prd) => ralphIterations[prd]?.length > 0
+  );
+  const keysChanged = currentKeys.length !== prevIterationsKeys.length ||
+    currentKeys.some((key) => !prevIterationsKeys.includes(key));
+
+  if (keysChanged) {
+    setPrevIterationsKeys(currentKeys);
+    const newPrds = currentKeys.filter((prd) => !expandedPrds.has(prd));
+    if (newPrds.length > 0) {
       const next = new Set(expandedPrds);
-      next.add(ralphingPrd);
+      newPrds.forEach((prd) => next.add(prd));
       setExpandedPrds(next);
     }
   }

@@ -8,6 +8,7 @@ import { useMessageStore } from "@/contexts";
 interface UseRalphIterationsProps {
   folderPath: string | null;
   runClaude: (message: string, folderPath: string, sessionId: string | null) => Promise<string>;
+  onAutoSelectIteration?: () => void;
 }
 
 interface UseRalphIterationsReturn {
@@ -22,6 +23,7 @@ interface UseRalphIterationsReturn {
   selectIteration: (prdName: string, iterationNumber: number) => void;
   clearIterationSelection: () => void;
   handleClaudeExit: (messages: ClaudeMessage[], sessionId: string) => void;
+  handleSessionIdReceived: (processId: string, sessionId: string) => void;
 }
 
 // State machine for ralph execution status
@@ -57,6 +59,7 @@ function isComplete(messages: ClaudeMessage[]): boolean {
 export function useRalphIterations({
   folderPath,
   runClaude,
+  onAutoSelectIteration,
 }: UseRalphIterationsProps): UseRalphIterationsReturn {
   const store = useMessageStore();
 
@@ -201,8 +204,9 @@ export function useRalphIterations({
 
       // Auto-select the new iteration
       setSelectedIteration({ prd: prdName, iteration: nextIterationNumber });
+      onAutoSelectIteration?.();
     },
-    [folderPath, createAndStartIteration]
+    [folderPath, createAndStartIteration, onAutoSelectIteration]
   );
 
   const stopRalphing = useCallback(async () => {
@@ -280,6 +284,29 @@ export function useRalphIterations({
     setSelectedIteration(null);
   }, []);
 
+  // Handle session ID received - persist immediately so we don't lose it on crash
+  const handleSessionIdReceived = useCallback(
+    async (processId: string, sessionId: string) => {
+      const currentState = ralphStateRef.current;
+      // Only persist if this is the process we're tracking
+      if (currentState.status !== "running" || currentState.processId !== processId) return;
+      if (!folderPath) return;
+
+      const { prdName, iterationNumber } = currentState;
+      try {
+        await invoke("update_ralph_iteration_session_id", {
+          folderPath,
+          prdName,
+          iterationNumber,
+          sessionId,
+        });
+      } catch (err) {
+        console.error("Failed to persist session ID:", err);
+      }
+    },
+    [folderPath]
+  );
+
   // Handle Claude exit - called from useClaudeSession when claude-exit event fires
   const handleClaudeExit = useCallback(
     async (messages: ClaudeMessage[], sessionId: string) => {
@@ -355,6 +382,7 @@ export function useRalphIterations({
 
           // Auto-select the new iteration
           setSelectedIteration({ prd: prdName, iteration: nextIterationNumber });
+          onAutoSelectIteration?.();
         }
       } catch (err) {
         console.error("Failed to handle Claude exit:", err);
@@ -362,7 +390,7 @@ export function useRalphIterations({
         setRalphState({ status: "idle" });
       }
     },
-    [folderPath, runClaude]
+    [folderPath, runClaude, onAutoSelectIteration]
   );
 
   return {
@@ -377,5 +405,6 @@ export function useRalphIterations({
     selectIteration,
     clearIterationSelection,
     handleClaudeExit,
+    handleSessionIdReceived,
   };
 }

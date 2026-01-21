@@ -27,20 +27,26 @@ interface ProcessInfo {
 
 interface UseClaudeSessionOptions {
   onClaudeExit?: (messages: ClaudeMessage[], sessionId: string) => void;
+  onSessionIdReceived?: (processId: string, sessionId: string) => void;
 }
 
 export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
-  const { onClaudeExit } = options;
+  const { onClaudeExit, onSessionIdReceived } = options;
   const store = useMessageStore();
 
   // Track process_id -> session info mapping
   const processesRef = useRef<Map<string, ProcessInfo>>(new Map());
   const onClaudeExitRef = useRef(onClaudeExit);
+  const onSessionIdReceivedRef = useRef(onSessionIdReceived);
 
-  // Keep the callback ref up to date
+  // Keep the callback refs up to date
   useEffect(() => {
     onClaudeExitRef.current = onClaudeExit;
   }, [onClaudeExit]);
+
+  useEffect(() => {
+    onSessionIdReceivedRef.current = onSessionIdReceived;
+  }, [onSessionIdReceived]);
 
   // Set up event listeners
   useEffect(() => {
@@ -70,6 +76,8 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
               if (processInfo.sessionId !== parsed.session_id) {
                 processInfo.sessionId = parsed.session_id;
                 store.setLiveSessionId(parsed.session_id, process_id);
+                // Notify listeners so they can persist the session ID immediately
+                onSessionIdReceivedRef.current?.(process_id, parsed.session_id);
               }
             }
             store.addMessage(parsed, process_id);

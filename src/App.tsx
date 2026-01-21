@@ -28,15 +28,22 @@ function App() {
   const messages = store.viewedMessages;
   const isViewingRunning = store.isViewingRunningSession;
 
-  // Store ralph iterations handler in a ref that can be updated
+  // Store ralph iterations handlers in refs that can be updated
   const handleClaudeExitRef = React.useRef<((messages: import("@/types").ClaudeMessage[], sessionId: string) => void) | null>(null);
+  const handleSessionIdReceivedRef = React.useRef<((processId: string, sessionId: string) => void) | null>(null);
 
-  // Claude session hook - callback uses ref to get latest handler
+  // Claude session hook - callbacks use refs to get latest handlers
   const claudeExitCallback = useCallback((msgs: import("@/types").ClaudeMessage[], sessionId: string) => {
     handleClaudeExitRef.current?.(msgs, sessionId);
   }, []);
+  const sessionIdReceivedCallback = useCallback((processId: string, sessionId: string) => {
+    handleSessionIdReceivedRef.current?.(processId, sessionId);
+  }, []);
 
-  const { runClaude, stopClaude } = useClaudeSession({ onClaudeExit: claudeExitCallback });
+  const { runClaude, stopClaude } = useClaudeSession({
+    onClaudeExit: claudeExitCallback,
+    onSessionIdReceived: sessionIdReceivedCallback,
+  });
 
   // Auto-scroll hook
   const { scrollRef, showScrollbar, handleScroll, resetAutoScroll } = useAutoScroll(messages);
@@ -57,6 +64,7 @@ function App() {
   const ralphIterations = useRalphIterations({
     folderPath,
     runClaude,
+    onAutoSelectIteration: useCallback(() => setActiveTab("ralph"), []),
   });
 
   // Stable callback for auto-select (uses ref pattern to avoid dependency on ralphIterations)
@@ -81,10 +89,13 @@ function App() {
     onAutoSelectPrd: handleAutoSelectPrd,
   });
 
-  // Update the ref with the current handleClaudeExit
+  // Update the refs with the current handlers
   useEffect(() => {
     handleClaudeExitRef.current = ralphIterations.handleClaudeExit;
   }, [ralphIterations.handleClaudeExit]);
+  useEffect(() => {
+    handleSessionIdReceivedRef.current = ralphIterations.handleSessionIdReceived;
+  }, [ralphIterations.handleSessionIdReceived]);
 
   // Handle start ralphing
   function handleStartRalphing() {
@@ -121,7 +132,11 @@ function App() {
     if (ralphIterations.isRalphing && ralphIterations.ralphingPrd !== prdName) {
       ralphIterations.stopRalphing();
     }
+    // Select the PRD (loads content for split view, but skip history - iteration will load its own)
+    selectRalphPrd(prdName, false);
     ralphIterations.selectIteration(prdName, iterationNumber);
+    setActiveTab("ralph");
+    resetAutoScroll();
   }
 
   // Folder selection
@@ -193,17 +208,45 @@ function App() {
     });
   }
 
-  // Handle plan selection (clear ralph selection first)
+  // Handle plan selection
   function handleSelectPlan(planName: string) {
-    clearRalphSelection();
     selectPlan(planName);
+    setActiveTab("plans");
+    resetAutoScroll();
   }
 
-  // Handle ralph PRD selection (clear plan selection first)
+  // Handle ralph PRD selection
   function handleSelectRalphPrd(prdName: string) {
-    clearPlanSelection();
     ralphIterations.clearIterationSelection();
     selectRalphPrd(prdName);
+    setActiveTab("ralph");
+    resetAutoScroll();
+  }
+
+  // View existing Ralph session from plan
+  function handleViewRalphSession() {
+    if (!selectedPlan) return;
+    handleSelectRalphPrd(selectedPlan);
+  }
+
+  // Handle tab change (preserve selections, reload session history)
+  function handleTabChange(tab: string) {
+    setActiveTab(tab);
+    // Reset auto-scroll so we scroll to bottom when messages load
+    resetAutoScroll();
+    // Reload the session history for the selected item in the target tab
+    if (tab === "plans" && selectedPlan) {
+      selectPlan(selectedPlan);
+    } else if (tab === "ralph") {
+      const iteration = ralphIterations.selectedIteration;
+      if (iteration) {
+        // Reload iteration's session (PRD content should already be loaded)
+        ralphIterations.selectIteration(iteration.prd, iteration.iteration);
+      } else if (selectedRalphPrd) {
+        // Reload PRD's session
+        selectRalphPrd(selectedRalphPrd);
+      }
+    }
   }
 
   // Render folder selection screen
@@ -218,7 +261,7 @@ function App() {
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         plans={plans}
         selectedPlan={selectedPlan}
         onSelectPlan={handleSelectPlan}
@@ -232,12 +275,11 @@ function App() {
         ralphIterations={ralphIterations.iterations}
         selectedRalphIteration={ralphIterations.selectedIteration}
         onSelectRalphIteration={handleSelectRalphIteration}
-        ralphingPrd={ralphIterations.ralphingPrd}
       />
 
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {selectedPlan && planContent ? (
+        {activeTab === "plans" && selectedPlan && planContent ? (
           <PlanSplitView
             messages={messages}
             scrollRef={scrollRef}
@@ -255,8 +297,10 @@ function App() {
             splitPosition={splitPosition}
             onSplitChange={setSplitPosition}
             onCreateRalphSession={createRalphSession}
+            ralphPrds={ralphPrds}
+            onViewRalphSession={handleViewRalphSession}
           />
-        ) : selectedRalphPrd && ralphPrdContent ? (
+        ) : activeTab === "ralph" && selectedRalphPrd && ralphPrdContent ? (
           <RalphPrdSplitView
             messages={messages}
             scrollRef={scrollRef}
@@ -279,7 +323,7 @@ function App() {
             isViewingIteration={ralphIterations.selectedIteration !== null}
             iterations={ralphIterations.iterations[selectedRalphPrd] || []}
           />
-        ) : messages.length === 0 ? (
+        ) : (activeTab === "plans" && !selectedPlan) || (activeTab === "ralph" && !selectedRalphPrd) ? (
           <EmptyState
             inputValue={message}
             onInputChange={setMessage}
