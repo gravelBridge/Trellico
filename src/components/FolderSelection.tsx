@@ -47,7 +47,7 @@ export function FolderSelection({ onSelectFolder }: FolderSelectionProps) {
               transition: 'opacity 0.5s ease 0.1s',
             }}
           >
-            The beautiful, opinioated app for Ralph loops
+            The beautiful, opinionated app for Ralph loops
           </p>
 
           {/* Description */}
