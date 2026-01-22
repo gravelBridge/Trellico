@@ -8,24 +8,13 @@ pub static CLAUDE_PROCESSES: LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 // Per-folder watchers and known files tracking
+#[derive(Default)]
 pub struct FolderWatchers {
     pub plans_watcher: Option<RecommendedWatcher>,
     pub ralph_prd_watcher: Option<RecommendedWatcher>,
     pub ralph_iterations_watcher: Option<RecommendedWatcher>,
     pub known_plans: HashSet<String>,
     pub known_ralph_prds: HashSet<String>,
-}
-
-impl Default for FolderWatchers {
-    fn default() -> Self {
-        Self {
-            plans_watcher: None,
-            ralph_prd_watcher: None,
-            ralph_iterations_watcher: None,
-            known_plans: HashSet::new(),
-            known_ralph_prds: HashSet::new(),
-        }
-    }
 }
 
 // Map of folder_path -> FolderWatchers

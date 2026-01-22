@@ -53,6 +53,18 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
   // Track Claude availability errors
   const [claudeError, setClaudeError] = useState<ClaudeAvailabilityError | null>(null);
 
+  // Check Claude availability on mount
+  useEffect(() => {
+    invoke<ClaudeStatus>("check_claude_available").then((status) => {
+      if (!status.available && status.error) {
+        setClaudeError({
+          message: status.error,
+          type: (status.error_type as ClaudeAvailabilityError["type"]) || "unknown",
+        });
+      }
+    });
+  }, []);
+
   // Keep the callback refs up to date
   useEffect(() => {
     onClaudeExitRef.current = onClaudeExit;
