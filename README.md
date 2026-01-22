@@ -19,7 +19,7 @@ Trellico is a Tauri MacOS app that allows you to run Ralph loops—long-running 
 ## Requirements
 
 - macOS (Apple Silicon or Intel)
-- [Claude Code]([https://claude.ai/download](https://claude.com/product/claude-code)) installed and authenticated
+- [Claude Code](https://claude.com/product/claude-code) installed and authenticated
 
 ## Development
 
