@@ -8,7 +8,7 @@ You are an autonomous coding agent working on a software project.
 2. Read the progress log at \`progress.txt\` in the same directory as the above PRD (check Codebase Patterns section first)
 3. Check you're on the correct branch from PRD \`branchName\`. If not, check it out or create from main.
 4. Pick the **highest priority** user story where \`passes: false\`
-5. Implement that single user story
+5. Implement that single user story (ONLY IMPLEMENT ONE STORY)
 6. Run quality checks (e.g., typecheck, lint, test - use whatever your project requires)
 7. Update AGENTS.md/CLAUDE.md files if you discover reusable patterns (see below)
 8. If checks pass, commit ALL changes (except the .trellico folder) with message: \`feat: [Story ID] - [Story Title]\`
