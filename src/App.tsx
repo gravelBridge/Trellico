@@ -9,6 +9,7 @@ import { Welcome } from "@/components/Welcome";
 import { Sidebar } from "@/components/Sidebar";
 import { EmptyState } from "@/components/EmptyState";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ErrorDialog } from "@/components/ErrorDialog";
 import { PlanSplitView } from "@/components/PlanSplitView";
 import { RalphPrdSplitView } from "@/components/RalphPrdSplitView";
 import { MessageList } from "@/components/MessageList";
@@ -112,7 +113,7 @@ function App() {
     handleSessionIdReceivedRef.current?.(processId, sessionId);
   }, []);
 
-  const { runClaude, stopClaude } = useClaudeSession({
+  const { runClaude, stopClaude, claudeError, clearClaudeError } = useClaudeSession({
     onClaudeExit: claudeExitCallback,
     onSessionIdReceived: sessionIdReceivedCallback,
   });
@@ -758,6 +759,14 @@ function App() {
           }
         }}
         onCancel={() => setCloseFolderDialog({ isOpen: false, path: null })}
+      />
+
+      {/* Claude error dialog */}
+      <ErrorDialog
+        isOpen={claudeError !== null}
+        title={claudeError?.type === "not_installed" ? "Claude Not Installed" : claudeError?.type === "not_logged_in" ? "Claude Not Logged In" : "Claude Error"}
+        message={claudeError?.message ?? ""}
+        onClose={clearClaudeError}
       />
     </main>
   );

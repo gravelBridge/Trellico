@@ -2,6 +2,7 @@ use crate::state::CLAUDE_PROCESSES;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
 use std::io::Read;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
@@ -105,6 +106,53 @@ pub fn stop_claude(process_id: Option<String>) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[derive(Clone, Serialize)]
+pub struct ClaudeStatus {
+    pub available: bool,
+    pub error: Option<String>,
+    pub error_type: Option<String>, // "not_installed", "not_logged_in", "unknown"
+}
+
+#[tauri::command]
+pub fn check_claude_available() -> ClaudeStatus {
+    // Quick check: just verify claude exists and responds to --version
+    // Auth errors will be caught when the actual command runs
+    let which_result = Command::new("which").arg("claude").output();
+
+    match which_result {
+        Ok(output) if output.status.success() => {
+            // Claude is in PATH, verify it runs
+            let version_result = Command::new("claude").arg("--version").output();
+
+            match version_result {
+                Ok(output) if output.status.success() => ClaudeStatus {
+                    available: true,
+                    error: None,
+                    error_type: None,
+                },
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    ClaudeStatus {
+                        available: false,
+                        error: Some(format!("Claude Code error: {}", stderr)),
+                        error_type: Some("unknown".to_string()),
+                    }
+                }
+                Err(e) => ClaudeStatus {
+                    available: false,
+                    error: Some(format!("Failed to run Claude: {}", e)),
+                    error_type: Some("not_installed".to_string()),
+                },
+            }
+        }
+        _ => ClaudeStatus {
+            available: false,
+            error: Some("Claude Code is not installed. Please install it from https://claude.com/product/claude-code".to_string()),
+            error_type: Some("not_installed".to_string()),
+        },
+    }
 }
 
 fn run_claude_process(

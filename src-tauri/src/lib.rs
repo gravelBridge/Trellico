@@ -16,6 +16,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::claude::run_claude,
             commands::claude::stop_claude,
+            commands::claude::check_claude_available,
             commands::plans::setup_folder,
             commands::plans::list_plans,
             commands::plans::read_plan,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import type { ClaudeMessage } from "@/types";
@@ -25,6 +25,17 @@ interface ProcessInfo {
   onExit?: (messages: ClaudeMessage[]) => void;
 }
 
+interface ClaudeStatus {
+  available: boolean;
+  error: string | null;
+  error_type: string | null; // "not_installed", "not_logged_in", "unknown"
+}
+
+export interface ClaudeAvailabilityError {
+  message: string;
+  type: "not_installed" | "not_logged_in" | "unknown";
+}
+
 interface UseClaudeSessionOptions {
   onClaudeExit?: (messages: ClaudeMessage[], sessionId: string) => void;
   onSessionIdReceived?: (processId: string, sessionId: string) => void;
@@ -39,6 +50,9 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
   const onClaudeExitRef = useRef(onClaudeExit);
   const onSessionIdReceivedRef = useRef(onSessionIdReceived);
 
+  // Track Claude availability errors
+  const [claudeError, setClaudeError] = useState<ClaudeAvailabilityError | null>(null);
+
   // Keep the callback refs up to date
   useEffect(() => {
     onClaudeExitRef.current = onClaudeExit;
@@ -47,6 +61,11 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
   useEffect(() => {
     onSessionIdReceivedRef.current = onSessionIdReceived;
   }, [onSessionIdReceived]);
+
+  // Check Claude availability
+  const checkClaudeAvailable = useCallback(async (): Promise<ClaudeStatus> => {
+    return invoke<ClaudeStatus>("check_claude_available");
+  }, []);
 
   // Set up event listeners
   useEffect(() => {
@@ -69,7 +88,20 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
           const trimmed = line.trim();
           if (!trimmed) continue;
           try {
-            const parsed = JSON.parse(trimmed) as ClaudeMessage;
+            const parsed = JSON.parse(trimmed) as ClaudeMessage & { error?: string; is_error?: boolean; result?: string };
+
+            // Detect authentication errors
+            if (parsed.error === "authentication_failed" ||
+                (parsed.is_error && parsed.result?.includes("Invalid API key"))) {
+              setClaudeError({
+                message: "Claude Code is not logged in. Please run 'claude' in your terminal to authenticate.",
+                type: "not_logged_in",
+              });
+              store.endProcess(process_id);
+              processesRef.current.delete(process_id);
+              return;
+            }
+
             // Extract session ID from init message
             if (parsed.type === "system" && parsed.subtype === "init" && parsed.session_id) {
               // Update session ID if we got it from init (for new sessions)
@@ -113,7 +145,15 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
         const { process_id, error } = event.payload;
         const processInfo = processesRef.current.get(process_id);
         if (processInfo) {
-          store.addMessage({ type: "system", content: `Error: ${error}` }, process_id);
+          // Detect spawn failures (Claude not installed)
+          if (error.includes("Failed to spawn claude") || error.includes("No such file")) {
+            setClaudeError({
+              message: "Claude Code is not installed. Please install it from https://claude.com/product/claude-code",
+              type: "not_installed",
+            });
+          } else {
+            store.addMessage({ type: "system", content: `Error: ${error}` }, process_id);
+          }
           store.endProcess(process_id);
           processesRef.current.delete(process_id);
         }
@@ -139,6 +179,7 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
       onExit?: (messages: ClaudeMessage[]) => void
     ): Promise<string> => {
       // Start the process and get process_id
+      // Auth errors are detected from the output stream
       const processId = await invoke<string>("run_claude", {
         message,
         folderPath,
@@ -183,10 +224,17 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
     }
   }, [store]);
 
+  const clearClaudeError = useCallback(() => {
+    setClaudeError(null);
+  }, []);
+
   return {
     runClaude,
     stopClaude,
     isSessionRunning: store.isSessionRunning,
     hasAnyRunning: store.hasAnyRunning,
+    claudeError,
+    clearClaudeError,
+    checkClaudeAvailable,
   };
 }

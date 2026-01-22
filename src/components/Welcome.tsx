@@ -46,7 +46,7 @@ export function Welcome({ onSelectFolder }: WelcomeProps) {
         <div className="max-w-xl w-full animate-fade-slide-in py-4">
           {/* Logo */}
           <h1
-            className="text-[48px] sm:text-[64px] lg:text-[80px] font-bold tracking-[-0.04em] text-foreground mb-6 sm:mb-8"
+            className="text-[48px] sm:text-[64px] lg:text-[80px] font-bold tracking-[-0.04em] text-foreground mb-4 sm:mb-5"
             style={{
               fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
             }}
@@ -55,9 +55,23 @@ export function Welcome({ onSelectFolder }: WelcomeProps) {
           </h1>
 
           {/* Description */}
-          <p className="text-[18px] sm:text-[22px] lg:text-[26px] leading-[1.4] text-muted-foreground mb-10 sm:mb-12 lg:mb-14 max-w-md animate-fade-in-100">
+          <p className="text-[18px] sm:text-[22px] lg:text-[26px] leading-[1.4] text-muted-foreground mb-6 sm:mb-8 max-w-md animate-fade-in-100">
             Plan, execute, and review Ralph loops with precision.
           </p>
+
+          {/* Supports section */}
+          <div className="animate-fade-in-150 mb-10 sm:mb-12">
+            <div className="text-[11px] tracking-[0.2em] uppercase mb-4 text-muted-foreground/50 font-medium">
+              Supports
+            </div>
+            <div className="flex items-center gap-4">
+              <img
+                src="/claude-code.png"
+                alt="Claude Code"
+                className="h-6 opacity-70"
+              />
+            </div>
+          </div>
 
           {/* CTA - Terminal style */}
           <div className="animate-fade-in-200">
@@ -100,16 +114,6 @@ export function Welcome({ onSelectFolder }: WelcomeProps) {
                 <path d="M5 12h14M12 5l7 7-7 7" />
               </svg>
             </button>
-          </div>
-
-          {/* Features row */}
-          <div className="hidden sm:flex gap-10 lg:gap-14 mt-14 lg:mt-20 animate-fade-in-300">
-            {['Plan', 'Execute', 'Review'].map((label, i) => (
-              <div key={label} className="flex items-baseline gap-2">
-                <span className="text-[11px] text-muted-foreground/40 font-mono">0{i + 1}</span>
-                <span className="text-[13px] text-muted-foreground/70 tracking-wide">{label}</span>
-              </div>
-            ))}
           </div>
         </div>
       </div>
