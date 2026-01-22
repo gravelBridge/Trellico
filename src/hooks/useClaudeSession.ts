@@ -192,11 +192,28 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
     ): Promise<string> => {
       // Start the process and get process_id
       // Auth errors are detected from the output stream
-      const processId = await invoke<string>("run_claude", {
-        message,
-        folderPath,
-        sessionId,
-      });
+      let processId: string;
+      try {
+        processId = await invoke<string>("run_claude", {
+          message,
+          folderPath,
+          sessionId,
+        });
+      } catch (err) {
+        const errorMsg = String(err);
+        if (errorMsg.includes("not installed") || errorMsg.includes("No such file")) {
+          setClaudeError({
+            message: "Claude Code is not installed. Please install it from https://claude.com/product/claude-code",
+            type: "not_installed",
+          });
+        } else {
+          setClaudeError({
+            message: errorMsg,
+            type: "unknown",
+          });
+        }
+        throw err;
+      }
 
       // Track this process
       processesRef.current.set(processId, {
