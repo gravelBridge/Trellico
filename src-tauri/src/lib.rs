@@ -4,7 +4,8 @@ mod platform;
 mod state;
 mod utils;
 
-use tauri::Manager;
+use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
+use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -14,6 +15,8 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_decorum::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             commands::claude::run_claude,
             commands::claude::stop_claude,
@@ -43,6 +46,59 @@ pub fn run() {
         .setup(|app| {
             let main_window = app.get_webview_window("main").unwrap();
             platform::setup_macos_window(&main_window);
+
+            // Build custom menu with "Check for Updates"
+            let check_updates = MenuItemBuilder::with_id("check-for-updates", "Check for Updates...")
+                .build(app)?;
+
+            let app_submenu = SubmenuBuilder::new(app, "Trellico")
+                .about(None)
+                .separator()
+                .item(&check_updates)
+                .separator()
+                .services()
+                .separator()
+                .hide()
+                .hide_others()
+                .show_all()
+                .separator()
+                .quit()
+                .build()?;
+
+            let edit_submenu = SubmenuBuilder::new(app, "Edit")
+                .undo()
+                .redo()
+                .separator()
+                .cut()
+                .copy()
+                .paste()
+                .select_all()
+                .build()?;
+
+            let view_submenu = SubmenuBuilder::new(app, "View")
+                .fullscreen()
+                .build()?;
+
+            let window_submenu = SubmenuBuilder::new(app, "Window")
+                .minimize()
+                .separator()
+                .close_window()
+                .build()?;
+
+            let menu = Menu::with_items(
+                app,
+                &[&app_submenu, &edit_submenu, &view_submenu, &window_submenu],
+            )?;
+
+            app.set_menu(menu)?;
+
+            // Handle menu events
+            app.on_menu_event(move |app_handle, event| {
+                if event.id().as_ref() == "check-for-updates" {
+                    let _ = app_handle.emit("check-for-updates", ());
+                }
+            });
+
             Ok(())
         })
         .run(tauri::generate_context!())

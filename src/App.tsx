@@ -10,6 +10,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { EmptyState } from "@/components/EmptyState";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorDialog } from "@/components/ErrorDialog";
+import { UpdateChecker } from "@/components/UpdateChecker";
 import { PlanSplitView } from "@/components/PlanSplitView";
 import { RalphPrdSplitView } from "@/components/RalphPrdSplitView";
 import { MessageList } from "@/components/MessageList";
@@ -609,7 +610,12 @@ function App() {
 
   // Render welcome screen
   if (!folderPath) {
-    return <Welcome onSelectFolder={selectFolder} />;
+    return (
+      <>
+        <Welcome onSelectFolder={selectFolder} />
+        <UpdateChecker />
+      </>
+    );
   }
 
   // Render main layout
@@ -768,6 +774,9 @@ function App() {
         message={claudeError?.message ?? ""}
         onClose={clearClaudeError}
       />
+
+      {/* Auto-update checker */}
+      <UpdateChecker />
     </main>
   );
 }
