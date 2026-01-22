@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import {
   Collapsible,
@@ -32,31 +32,16 @@ interface RalphPrdViewerProps {
 function StoryRow({
   story,
   isCurrentTask,
+  isOpen,
+  onOpenChange,
 }: {
   story: UserStory;
   isCurrentTask: boolean;
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(isCurrentTask);
-  const prevIsCurrentTask = useRef(isCurrentTask);
-  const prevPasses = useRef(story.passes);
-
-  // Auto-expand when story becomes active, auto-collapse when completed
-  useEffect(() => {
-    // Story just became active (queued → active)
-    if (isCurrentTask && !prevIsCurrentTask.current) {
-      setIsOpen(true);
-    }
-    // Story just completed (active → done)
-    if (story.passes && !prevPasses.current) {
-      setIsOpen(false);
-    }
-
-    prevIsCurrentTask.current = isCurrentTask;
-    prevPasses.current = story.passes;
-  }, [isCurrentTask, story.passes]);
-
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
       <CollapsibleTrigger asChild>
         <button
           className={cn(
@@ -119,14 +104,92 @@ function StoryRow({
   );
 }
 
+// Build a snapshot of story states for comparison
+function buildStorySnapshot(
+  stories: UserStory[],
+  currentTaskId: string | undefined
+): Map<string, { passes: boolean; isCurrentTask: boolean }> {
+  const map = new Map<string, { passes: boolean; isCurrentTask: boolean }>();
+  for (const story of stories) {
+    map.set(story.id, {
+      passes: story.passes,
+      isCurrentTask: story.id === currentTaskId,
+    });
+  }
+  return map;
+}
+
 function PrettyView({ prd }: { prd: RalphPrd }) {
   const completedCount = prd.userStories.filter((s) => s.passes).length;
   const totalCount = prd.userStories.length;
 
-  const sortedStories = [...prd.userStories].sort(
-    (a, b) => a.priority - b.priority
+  const sortedStories = useMemo(
+    () => [...prd.userStories].sort((a, b) => a.priority - b.priority),
+    [prd.userStories]
   );
   const currentTaskId = sortedStories.find((s) => !s.passes)?.id;
+
+  // Track which stories are expanded
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(
+    () => new Set(currentTaskId ? [currentTaskId] : [])
+  );
+
+  // Track previous story states - this is the React-recommended pattern for
+  // adjusting state when props change (https://react.dev/learn/you-might-not-need-an-effect)
+  const [prevSnapshot, setPrevSnapshot] = useState(() =>
+    buildStorySnapshot(prd.userStories, currentTaskId)
+  );
+
+  // Compare current state to previous and adjust expanded set during render
+  const currentSnapshot = buildStorySnapshot(prd.userStories, currentTaskId);
+  let snapshotChanged = false;
+
+  if (prevSnapshot.size !== currentSnapshot.size) {
+    snapshotChanged = true;
+  } else {
+    for (const [id, curr] of currentSnapshot) {
+      const prev = prevSnapshot.get(id);
+      if (
+        !prev ||
+        prev.passes !== curr.passes ||
+        prev.isCurrentTask !== curr.isCurrentTask
+      ) {
+        snapshotChanged = true;
+        break;
+      }
+    }
+  }
+
+  if (snapshotChanged) {
+    // Compute which stories need auto-expand/collapse
+    const newExpandedIds = new Set(expandedIds);
+
+    for (const story of prd.userStories) {
+      const prev = prevSnapshot.get(story.id);
+      const curr = currentSnapshot.get(story.id)!;
+
+      if (prev) {
+        // Story just became active (queued → active): expand it
+        if (curr.isCurrentTask && !prev.isCurrentTask) {
+          newExpandedIds.add(story.id);
+        }
+        // Story just completed (active → done): collapse it
+        if (curr.passes && !prev.passes) {
+          newExpandedIds.delete(story.id);
+        }
+      } else {
+        // New story - expand if it's the current task
+        if (curr.isCurrentTask) {
+          newExpandedIds.add(story.id);
+        }
+      }
+    }
+
+    // React allows setState during render when the condition is based on
+    // comparing previous and current values
+    setPrevSnapshot(currentSnapshot);
+    setExpandedIds(newExpandedIds);
+  }
 
   return (
     <div className="p-4 space-y-2">
@@ -161,6 +224,18 @@ function PrettyView({ prd }: { prd: RalphPrd }) {
             key={story.id}
             story={story}
             isCurrentTask={story.id === currentTaskId}
+            isOpen={expandedIds.has(story.id)}
+            onOpenChange={(open) => {
+              setExpandedIds((prev) => {
+                const next = new Set(prev);
+                if (open) {
+                  next.add(story.id);
+                } else {
+                  next.delete(story.id);
+                }
+                return next;
+              });
+            }}
           />
         ))}
       </div>
