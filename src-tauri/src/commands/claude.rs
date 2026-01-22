@@ -2,11 +2,45 @@ use crate::state::CLAUDE_PROCESSES;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
 use std::io::Read;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
+
+/// Find the claude binary by checking common installation paths.
+/// GUI apps on macOS don't inherit the user's shell PATH, so we can't rely on `which`.
+fn find_claude_binary() -> Option<PathBuf> {
+    // Check common installation locations
+    let home = std::env::var("HOME").ok()?;
+
+    let candidates = [
+        format!("{}/.local/bin/claude", home),
+        "/usr/local/bin/claude".to_string(),
+        "/opt/homebrew/bin/claude".to_string(),
+        "/usr/bin/claude".to_string(),
+    ];
+
+    for path in candidates {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    // Fallback: try which (works in dev mode with inherited PATH)
+    if let Ok(output) = Command::new("which").arg("claude").output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
+            }
+        }
+    }
+
+    None
+}
 
 #[derive(Clone, Serialize)]
 struct ClaudeOutput {
@@ -117,39 +151,36 @@ pub struct ClaudeStatus {
 
 #[tauri::command]
 pub fn check_claude_available() -> ClaudeStatus {
-    // Quick check: just verify claude exists and responds to --version
-    // Auth errors will be caught when the actual command runs
-    let which_result = Command::new("which").arg("claude").output();
+    // Find claude binary (GUI apps don't inherit shell PATH)
+    let claude_path = match find_claude_binary() {
+        Some(path) => path,
+        None => {
+            return ClaudeStatus {
+                available: false,
+                error: Some("Claude Code is not installed. Please install it from https://claude.com/product/claude-code".to_string()),
+                error_type: Some("not_installed".to_string()),
+            };
+        }
+    };
 
-    match which_result {
-        Ok(output) if output.status.success() => {
-            // Claude is in PATH, verify it runs
-            let version_result = Command::new("claude").arg("--version").output();
-
-            match version_result {
-                Ok(output) if output.status.success() => ClaudeStatus {
-                    available: true,
-                    error: None,
-                    error_type: None,
-                },
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    ClaudeStatus {
-                        available: false,
-                        error: Some(format!("Claude Code error: {}", stderr)),
-                        error_type: Some("unknown".to_string()),
-                    }
-                }
-                Err(e) => ClaudeStatus {
-                    available: false,
-                    error: Some(format!("Failed to run Claude: {}", e)),
-                    error_type: Some("not_installed".to_string()),
-                },
+    // Verify it runs
+    match Command::new(&claude_path).arg("--version").output() {
+        Ok(output) if output.status.success() => ClaudeStatus {
+            available: true,
+            error: None,
+            error_type: None,
+        },
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            ClaudeStatus {
+                available: false,
+                error: Some(format!("Claude Code error: {}", stderr)),
+                error_type: Some("unknown".to_string()),
             }
         }
-        _ => ClaudeStatus {
+        Err(e) => ClaudeStatus {
             available: false,
-            error: Some("Claude Code is not installed. Please install it from https://claude.com/product/claude-code".to_string()),
+            error: Some(format!("Failed to run Claude: {}", e)),
             error_type: Some("not_installed".to_string()),
         },
     }
@@ -163,6 +194,10 @@ fn run_claude_process(
     process_id: &str,
     stop_flag: Arc<AtomicBool>,
 ) -> Result<i32, String> {
+    // Find claude binary (GUI apps don't inherit shell PATH)
+    let claude_path = find_claude_binary()
+        .ok_or_else(|| "Claude Code is not installed".to_string())?;
+
     let pty_system = native_pty_system();
 
     let pair = pty_system
@@ -174,7 +209,7 @@ fn run_claude_process(
         })
         .map_err(|e| format!("Failed to open pty: {}", e))?;
 
-    let mut cmd = CommandBuilder::new("claude");
+    let mut cmd = CommandBuilder::new(claude_path);
 
     // Build args based on whether we're resuming a session
     let mut args: Vec<&str> = vec![
