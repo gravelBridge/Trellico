@@ -155,17 +155,21 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
         if (!mounted) return;
 
         const { process_id, error } = event.payload;
+
+        // Detect spawn failures (Claude not installed) - handle even if processInfo not yet set
+        if (error.includes("Failed to spawn claude") || error.includes("No such file") || error.includes("not installed")) {
+          setClaudeError({
+            message: "Claude Code is not installed. Please install it from https://claude.com/product/claude-code",
+            type: "not_installed",
+          });
+          store.endProcess(process_id);
+          processesRef.current.delete(process_id);
+          return;
+        }
+
         const processInfo = processesRef.current.get(process_id);
         if (processInfo) {
-          // Detect spawn failures (Claude not installed)
-          if (error.includes("Failed to spawn claude") || error.includes("No such file")) {
-            setClaudeError({
-              message: "Claude Code is not installed. Please install it from https://claude.com/product/claude-code",
-              type: "not_installed",
-            });
-          } else {
-            store.addMessage({ type: "system", content: `Error: ${error}` }, process_id);
-          }
+          store.addMessage({ type: "system", content: `Error: ${error}` }, process_id);
           store.endProcess(process_id);
           processesRef.current.delete(process_id);
         }
@@ -190,30 +194,22 @@ export function useClaudeSession(options: UseClaudeSessionOptions = {}) {
       userMessageToShow?: string,
       onExit?: (messages: ClaudeMessage[]) => void
     ): Promise<string> => {
-      // Start the process and get process_id
-      // Auth errors are detected from the output stream
-      let processId: string;
-      try {
-        processId = await invoke<string>("run_claude", {
-          message,
-          folderPath,
-          sessionId,
+      // Check Claude availability before starting
+      const status = await invoke<ClaudeStatus>("check_claude_available");
+      if (!status.available) {
+        setClaudeError({
+          message: status.error || "Claude Code is not available",
+          type: (status.error_type as ClaudeAvailabilityError["type"]) || "unknown",
         });
-      } catch (err) {
-        const errorMsg = String(err);
-        if (errorMsg.includes("not installed") || errorMsg.includes("No such file")) {
-          setClaudeError({
-            message: "Claude Code is not installed. Please install it from https://claude.com/product/claude-code",
-            type: "not_installed",
-          });
-        } else {
-          setClaudeError({
-            message: errorMsg,
-            type: "unknown",
-          });
-        }
-        throw err;
+        throw new Error(status.error || "Claude not available");
       }
+
+      // Start the process and get process_id
+      const processId = await invoke<string>("run_claude", {
+        message,
+        folderPath,
+        sessionId,
+      });
 
       // Track this process
       processesRef.current.set(processId, {
