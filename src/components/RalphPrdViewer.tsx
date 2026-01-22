@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import {
   Collapsible,
@@ -37,6 +37,23 @@ function StoryRow({
   isCurrentTask: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(isCurrentTask);
+  const prevIsCurrentTask = useRef(isCurrentTask);
+  const prevPasses = useRef(story.passes);
+
+  // Auto-expand when story becomes active, auto-collapse when completed
+  useEffect(() => {
+    // Story just became active (queued → active)
+    if (isCurrentTask && !prevIsCurrentTask.current) {
+      setIsOpen(true);
+    }
+    // Story just completed (active → done)
+    if (story.passes && !prevPasses.current) {
+      setIsOpen(false);
+    }
+
+    prevIsCurrentTask.current = isCurrentTask;
+    prevPasses.current = story.passes;
+  }, [isCurrentTask, story.passes]);
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
