@@ -7,9 +7,11 @@ use serde::{Deserialize, Serialize};
 pub struct FolderSession {
     pub id: String,
     pub provider: String,
+    pub session_type: String,
     pub display_name: Option<String>,
     pub created_at: String,
     pub linked_plan: Option<String>,
+    pub linked_ralph_prd: Option<String>,
 }
 
 /// Create a new session
@@ -18,21 +20,22 @@ pub fn create_session(
     session_id: &str,
     folder_path: &str,
     provider: &str,
+    session_type: &str,
 ) -> Result<(), String> {
     let conn = conn.lock().map_err(|e| format!("Lock error: {}", e))?;
     let now = Utc::now().to_rfc3339();
 
     conn.execute(
-        "INSERT OR IGNORE INTO sessions (id, folder_path, provider, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?4)",
-        params![session_id, folder_path, provider, now],
+        "INSERT OR IGNORE INTO sessions (id, folder_path, provider, session_type, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+        params![session_id, folder_path, provider, session_type, now],
     )
     .map_err(|e| format!("Failed to create session: {}", e))?;
 
     Ok(())
 }
 
-/// Get all sessions for a folder with their linked plan (if any)
+/// Get all sessions for a folder with their linked plan and ralph PRD (if any)
 pub fn get_folder_sessions(
     conn: &DbConnection,
     folder_path: &str,
@@ -41,9 +44,10 @@ pub fn get_folder_sessions(
 
     let mut stmt = conn
         .prepare(
-            "SELECT s.id, s.provider, s.display_name, s.created_at, sl.file_name
+            "SELECT s.id, s.provider, s.session_type, s.display_name, s.created_at, sl_plan.file_name, sl_ralph.file_name
              FROM sessions s
-             LEFT JOIN session_links sl ON s.id = sl.session_id AND sl.link_type = 'plan'
+             LEFT JOIN session_links sl_plan ON s.id = sl_plan.session_id AND sl_plan.link_type = 'plan'
+             LEFT JOIN session_links sl_ralph ON s.id = sl_ralph.session_id AND sl_ralph.link_type = 'ralph_prd'
              WHERE s.folder_path = ?1
              ORDER BY s.created_at DESC",
         )
@@ -54,9 +58,11 @@ pub fn get_folder_sessions(
             Ok(FolderSession {
                 id: row.get(0)?,
                 provider: row.get(1)?,
-                display_name: row.get(2)?,
-                created_at: row.get(3)?,
-                linked_plan: row.get(4)?,
+                session_type: row.get(2)?,
+                display_name: row.get(3)?,
+                created_at: row.get(4)?,
+                linked_plan: row.get(5)?,
+                linked_ralph_prd: row.get(6)?,
             })
         })
         .map_err(|e| format!("Failed to query sessions: {}", e))?

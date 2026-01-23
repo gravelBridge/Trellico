@@ -26,6 +26,7 @@ interface UseSessionManagementProps {
   setSelectedGeneratingItemId: (id: string | null) => void;
   clearRalphSelection: () => void;
   clearIterationSelection: () => void;
+  clearIterationsForPrd: (prdName: string) => void;
   clearSessionView: () => void;
 }
 
@@ -38,6 +39,7 @@ export function useSessionManagement({
   setSelectedGeneratingItemId,
   clearRalphSelection,
   clearIterationSelection,
+  clearIterationsForPrd,
   clearSessionView,
 }: UseSessionManagementProps) {
   const [renameDialog, setRenameDialog] = useState<RenameDialogState>({
@@ -154,7 +156,9 @@ export function useSessionManagement({
           folderPath,
           prdName: deleteConfirmDialog.id,
         });
-        // The file watcher will update the UI, but we should clear selection if needed
+        // Clear iterations from state immediately (file watcher will update prds list)
+        clearIterationsForPrd(deleteConfirmDialog.id);
+        // Clear selection if this was the selected PRD
         if (selectedRalphPrd === deleteConfirmDialog.id) {
           clearRalphSelection();
           clearIterationSelection();
@@ -176,6 +180,7 @@ export function useSessionManagement({
     setSelectedGeneratingItemId,
     clearRalphSelection,
     clearIterationSelection,
+    clearIterationsForPrd,
     clearSessionView,
     closeDeleteDialog,
   ]);

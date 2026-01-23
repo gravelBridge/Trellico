@@ -23,6 +23,7 @@ interface ProcessInfo {
   sessionId: string;
   buffer: string;
   provider: string;
+  sessionType: "plan" | "ralph_prd";
   onExit?: (messages: AIMessage[]) => void;
   initialUserMessage?: string; // Track user message for new sessions (saved to DB when session ID arrives)
 }
@@ -42,17 +43,19 @@ export interface ProviderAvailabilityError {
 
 interface UseAISessionOptions {
   onAIExit?: (messages: AIMessage[], sessionId: string) => void;
+  onAIError?: (processId: string) => void;
   onSessionIdReceived?: (processId: string, sessionId: string) => void;
   folderPath?: string | null;
 }
 
 export function useAISession(options: UseAISessionOptions = {}) {
-  const { onAIExit, onSessionIdReceived, folderPath } = options;
+  const { onAIExit, onAIError, onSessionIdReceived, folderPath } = options;
   const store = useMessageStore();
 
   // Track process_id -> session info mapping
   const processesRef = useRef<Map<string, ProcessInfo>>(new Map());
   const onAIExitRef = useRef(onAIExit);
+  const onAIErrorRef = useRef(onAIError);
   const onSessionIdReceivedRef = useRef(onSessionIdReceived);
   const folderPathRef = useRef(folderPath);
 
@@ -71,6 +74,10 @@ export function useAISession(options: UseAISessionOptions = {}) {
   useEffect(() => {
     onAIExitRef.current = onAIExit;
   }, [onAIExit]);
+
+  useEffect(() => {
+    onAIErrorRef.current = onAIError;
+  }, [onAIError]);
 
   useEffect(() => {
     onSessionIdReceivedRef.current = onSessionIdReceived;
@@ -114,6 +121,7 @@ export function useAISession(options: UseAISessionOptions = {}) {
                   message: "This provider requires paid credits. Please add credits to your account.",
                   type: "unknown",
                 });
+                onAIErrorRef.current?.(process_id);
                 store.endProcess(process_id);
                 processesRef.current.delete(process_id);
                 return;
@@ -128,6 +136,7 @@ export function useAISession(options: UseAISessionOptions = {}) {
                   message: "Provider is not logged in. Please run the CLI in your terminal to authenticate.",
                   type: "not_logged_in",
                 });
+                onAIErrorRef.current?.(process_id);
                 store.endProcess(process_id);
                 processesRef.current.delete(process_id);
                 return;
@@ -141,6 +150,7 @@ export function useAISession(options: UseAISessionOptions = {}) {
                 message: "Provider is not logged in. Please run the CLI in your terminal to authenticate.",
                 type: "not_logged_in",
               });
+              onAIErrorRef.current?.(process_id);
               store.endProcess(process_id);
               processesRef.current.delete(process_id);
               return;
@@ -164,6 +174,7 @@ export function useAISession(options: UseAISessionOptions = {}) {
                     sessionId: parsed.session_id,
                     folderPath,
                     provider: processInfo.provider,
+                    sessionType: processInfo.sessionType,
                   }).then(() => {
                     // Save the initial user message to DB (for new sessions)
                     if (processInfo.initialUserMessage) {
@@ -244,6 +255,7 @@ export function useAISession(options: UseAISessionOptions = {}) {
             message: "AI provider is not installed. Please install it first.",
             type: "not_installed",
           });
+          onAIErrorRef.current?.(process_id);
           store.endProcess(process_id);
           processesRef.current.delete(process_id);
           return;
@@ -252,6 +264,7 @@ export function useAISession(options: UseAISessionOptions = {}) {
         const processInfo = processesRef.current.get(process_id);
         if (processInfo) {
           store.addMessage({ type: "system", content: `Error: ${error}` }, process_id);
+          onAIErrorRef.current?.(process_id);
           store.endProcess(process_id);
           processesRef.current.delete(process_id);
         }
@@ -275,6 +288,7 @@ export function useAISession(options: UseAISessionOptions = {}) {
       sessionId: string | null,
       provider: Provider,
       userMessageToShow?: string,
+      sessionType: "plan" | "ralph_prd" = "plan",
       onExit?: (messages: AIMessage[]) => void
     ): Promise<string> => {
       // Check provider availability before starting
@@ -302,6 +316,7 @@ export function useAISession(options: UseAISessionOptions = {}) {
         sessionId: sessionId || "__pending__",
         buffer: "",
         provider,
+        sessionType,
         onExit,
         initialUserMessage: !sessionId ? userMessageToShow : undefined,
       });

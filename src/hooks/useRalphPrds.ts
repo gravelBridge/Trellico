@@ -149,13 +149,9 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
 
         if (isInitialLoad) return;
 
-        // Auto-select newly created PRD if Claude is running (creating it)
-        if (added.length === 1 && removed.length === 0 && hasAnyRunning()) {
-          selectRalphPrdRef.current?.(added[0], false);
-          onAutoSelectPrd?.(added[0]);
-          // Notify that a PRD was created (removes loading indicator)
-          onPrdCreated?.();
-          // Link session to this PRD - use the callback to get the correct session ID
+        // Handle newly created PRD
+        if (added.length === 1 && removed.length === 0) {
+          // Try to link session to this PRD - use the callback to get the correct session ID
           const sessionId = getSessionIdForPrd?.(added[0]);
           if (sessionId && !sessionId.startsWith("__pending__")) {
             // Session ID is already available, save link immediately
@@ -169,10 +165,18 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
                 setRalphLinkedSessionId(sessionId);
               })
               .catch(console.error);
-          } else {
+            // Auto-select and notify only if we have a matching session
+            selectRalphPrdRef.current?.(added[0], false);
+            onAutoSelectPrd?.(added[0]);
+            onPrdCreated?.();
+          } else if (sessionId) {
             // Session ID is still pending, store the PRD name for linking later
             setPendingLinkPrd(added[0]);
+            selectRalphPrdRef.current?.(added[0], false);
+            onAutoSelectPrd?.(added[0]);
+            onPrdCreated?.();
           }
+          // If no sessionId match, this PRD was created manually - don't auto-select
         }
 
         // If selected was removed, clear selection
@@ -185,7 +189,7 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
         console.error("Failed to load ralph prds:", err);
       }
     },
-    [folderPath, hasAnyRunning, onAutoSelectPrd, onPrdCreated, getSessionIdForPrd]
+    [folderPath, onAutoSelectPrd, onPrdCreated, getSessionIdForPrd]
   );
 
   const clearSelection = useCallback(() => {

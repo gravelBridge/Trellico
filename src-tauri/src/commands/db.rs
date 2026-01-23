@@ -47,9 +47,10 @@ pub fn db_create_session(
     session_id: String,
     folder_path: String,
     provider: String,
+    session_type: String,
 ) -> Result<(), String> {
     let conn = get_db()?;
-    sessions::create_session(conn, &session_id, &folder_path, &provider)
+    sessions::create_session(conn, &session_id, &folder_path, &provider, &session_type)
 }
 
 #[tauri::command]

@@ -123,17 +123,14 @@ export function usePlans({ folderPath, onPlanLinked }: UsePlansOptions) {
             }
           } else {
             setLinkedSessionId(null);
-            // Don't clear session if we're in the middle of creating a plan
-            if (!hasAnyRunning()) {
-              viewSession(null);
-            }
+            viewSession(null);
           }
         } catch {
           setLinkedSessionId(null);
         }
       }
     },
-    [folderPath, store, hasAnyRunning, viewSession]
+    [folderPath, store, viewSession]
   );
 
   // Keep selectPlanRef in sync (needed for file watcher callback stability)

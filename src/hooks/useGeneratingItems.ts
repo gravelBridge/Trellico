@@ -104,8 +104,8 @@ export function useGeneratingItems({
           folderPath,
         });
 
-        // Filter for sessions without a linked plan
-        const unlinkedSessions = sessions.filter((s) => !s.linked_plan);
+        // Filter for sessions without a linked plan or ralph PRD
+        const unlinkedSessions = sessions.filter((s) => !s.linked_plan && !s.linked_ralph_prd);
         if (!isActive || unlinkedSessions.length === 0) return;
 
         // For each session, get the first user message to use as display name
@@ -138,7 +138,7 @@ export function useGeneratingItems({
           items.push({
             id: session.id,
             displayName,
-            type: "plan",
+            type: session.session_type as "plan" | "ralph_prd",
             sessionId: session.id,
             provider: session.provider as Provider,
           });

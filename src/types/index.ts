@@ -22,9 +22,11 @@ export type Provider = "claude_code" | "amp";
 export interface FolderSession {
   id: string;
   provider: string;
+  session_type: "plan" | "ralph_prd";
   display_name: string | null;
   created_at: string;
   linked_plan: string | null;
+  linked_ralph_prd: string | null;
 }
 
 export interface SessionPlanLink {

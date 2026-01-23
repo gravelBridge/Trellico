@@ -21,7 +21,9 @@ interface UseRalphIterationsReturn {
   stopRalphing: () => void;
   selectIteration: (prdName: string, iterationNumber: number) => void;
   clearIterationSelection: () => void;
+  clearIterationsForPrd: (prdName: string) => void;
   handleAIExit: (messages: AIMessage[], sessionId: string) => void;
+  handleAIError: (processId: string) => void;
   handleSessionIdReceived: (processId: string, sessionId: string) => void;
 }
 
@@ -106,6 +108,30 @@ export function useRalphIterations({
   const ralphingPrd = ralphState.status === "running" ? ralphState.prdName : null;
   const currentIteration = ralphState.status === "running" ? ralphState.iterationNumber : null;
   const currentProcessId = ralphState.status === "running" ? ralphState.processId : null;
+
+  // Helper to mark an iteration as stopped
+  const markIterationStopped = useCallback(
+    async (prdName: string, iterationNumber: number) => {
+      if (!folderPath) return;
+      try {
+        await invoke("db_update_ralph_iteration_status", {
+          folderPath,
+          prdName,
+          iterationNumber,
+          status: "stopped",
+        });
+        setIterations((prev) => ({
+          ...prev,
+          [prdName]: (prev[prdName] || []).map((i) =>
+            i.iteration_number === iterationNumber ? { ...i, status: "stopped" as const } : i
+          ),
+        }));
+      } catch {
+        // Failed to update status
+      }
+    },
+    [folderPath]
+  );
 
   // Load all iterations from database
   const loadAllIterations = useCallback(async () => {
@@ -197,7 +223,15 @@ export function useRalphIterations({
       setSelectedIteration(null);
 
       // Create and start the iteration
-      const processId = await createAndStartIteration(prdName, nextIterationNumber);
+      let processId: string | null = null;
+      try {
+        processId = await createAndStartIteration(prdName, nextIterationNumber);
+      } catch (err) {
+        // If runAI fails (e.g., provider error), mark iteration as stopped
+        console.error("Failed to start iteration:", err);
+        await markIterationStopped(prdName, nextIterationNumber);
+        return;
+      }
       if (!processId) return;
 
       // Update state machine - single state update
@@ -212,7 +246,7 @@ export function useRalphIterations({
       setSelectedIteration({ prd: prdName, iteration: nextIterationNumber });
       onAutoSelectIteration?.();
     },
-    [folderPath, createAndStartIteration, onAutoSelectIteration]
+    [folderPath, createAndStartIteration, onAutoSelectIteration, markIterationStopped]
   );
 
   const stopRalphing = useCallback(async () => {
@@ -224,27 +258,8 @@ export function useRalphIterations({
     // Update state machine first
     setRalphState({ status: "idle" });
 
-    if (!folderPath) return;
-
-    // Update the current iteration status to "stopped" in database
-    try {
-      await invoke("db_update_ralph_iteration_status", {
-        folderPath,
-        prdName,
-        iterationNumber,
-        status: "stopped",
-      });
-      // Update local state
-      setIterations((prev) => ({
-        ...prev,
-        [prdName]: (prev[prdName] || []).map((i) =>
-          i.iteration_number === iterationNumber ? { ...i, status: "stopped" as const } : i
-        ),
-      }));
-    } catch (err) {
-      console.error("Failed to update iteration status:", err);
-    }
-  }, [folderPath]);
+    await markIterationStopped(prdName, iterationNumber);
+  }, [markIterationStopped]);
 
   const selectIteration = useCallback(
     async (prdName: string, iterationNumber: number) => {
@@ -310,6 +325,14 @@ export function useRalphIterations({
 
   const clearIterationSelection = useCallback(() => {
     setSelectedIteration(null);
+  }, []);
+
+  const clearIterationsForPrd = useCallback((prdName: string) => {
+    setIterations((prev) => {
+      const next = { ...prev };
+      delete next[prdName];
+      return next;
+    });
   }, []);
 
   // Handle session ID received - persist immediately so we don't lose it on crash
@@ -432,7 +455,16 @@ export function useRalphIterations({
           // Run Claude with new session
           const prdPath = `.trellico/ralph/${prdName}/prd.json`;
           const prompt = getRalphPrompt(prdPath);
-          const processId = await runAI(prompt, folderPath, null);
+          let processId: string;
+          try {
+            processId = await runAI(prompt, folderPath, null);
+          } catch (err) {
+            // Failed to start next iteration, mark it as stopped
+            console.error("Failed to start next iteration:", err);
+            await markIterationStopped(prdName, nextIterationNumber);
+            setRalphState({ status: "idle" });
+            return;
+          }
 
           // Update state machine with new iteration
           setRalphState({
@@ -448,11 +480,28 @@ export function useRalphIterations({
         }
       } catch (err) {
         console.error("Failed to handle AI exit:", err);
-        // On error, reset to idle state
+        // On error, mark current iteration as stopped and reset to idle state
+        await markIterationStopped(prdName, iterationNumber);
         setRalphState({ status: "idle" });
       }
     },
-    [folderPath, runAI, onAutoSelectIteration, store]
+    [folderPath, runAI, onAutoSelectIteration, store, markIterationStopped]
+  );
+
+  // Handle AI errors (provider errors, auth errors, etc.) - marks iteration as stopped
+  const handleAIError = useCallback(
+    async (processId: string) => {
+      const currentState = ralphStateRef.current;
+      // Only handle if this is our process
+      if (currentState.status !== "running" || currentState.processId !== processId) return;
+
+      const { prdName, iterationNumber } = currentState;
+
+      // Mark iteration as stopped and reset state
+      await markIterationStopped(prdName, iterationNumber);
+      setRalphState({ status: "idle" });
+    },
+    [markIterationStopped]
   );
 
   return {
@@ -466,7 +515,9 @@ export function useRalphIterations({
     stopRalphing,
     selectIteration,
     clearIterationSelection,
+    clearIterationsForPrd,
     handleAIExit,
+    handleAIError,
     handleSessionIdReceived,
   };
 }

@@ -118,6 +118,7 @@ function App() {
   const handleAIExitRef = React.useRef<((messages: AIMessage[], sessionId: string) => void) | null>(
     null
   );
+  const handleAIErrorRef = React.useRef<((processId: string) => void) | null>(null);
   const handleSessionIdReceivedRef = React.useRef<
     ((processId: string, sessionId: string) => void) | null
   >(null);
@@ -126,12 +127,16 @@ function App() {
   const aiExitCallback = useCallback((msgs: AIMessage[], sessionId: string) => {
     handleAIExitRef.current?.(msgs, sessionId);
   }, []);
+  const aiErrorCallback = useCallback((processId: string) => {
+    handleAIErrorRef.current?.(processId);
+  }, []);
   const sessionIdReceivedCallback = useCallback((processId: string, sessionId: string) => {
     handleSessionIdReceivedRef.current?.(processId, sessionId);
   }, []);
 
   const { runAI, stopAI, aiError, clearAIError } = useAISession({
     onAIExit: aiExitCallback,
+    onAIError: aiErrorCallback,
     onSessionIdReceived: sessionIdReceivedCallback,
   });
 
@@ -207,6 +212,7 @@ function App() {
     setSelectedGeneratingItemId,
     clearRalphSelection,
     clearIterationSelection: ralphIterations.clearIterationSelection,
+    clearIterationsForPrd: ralphIterations.clearIterationsForPrd,
     clearSessionView: () => store.viewSession(null),
   });
 
@@ -214,6 +220,10 @@ function App() {
   useEffect(() => {
     handleAIExitRef.current = ralphIterations.handleAIExit;
   }, [ralphIterations.handleAIExit]);
+
+  useEffect(() => {
+    handleAIErrorRef.current = ralphIterations.handleAIError;
+  }, [ralphIterations.handleAIError]);
 
   const handleRalphSessionIdReceived = ralphIterations.handleSessionIdReceived;
   useEffect(() => {
@@ -460,7 +470,7 @@ function App() {
     const fullMessage = `${ralphFormatPrompt}\n\nPlan filename: ${planFileName}.md\nOutput the JSON to: .trellico/ralph/${planFileName}/prd.json\n\n${planContent}`;
 
     resetAutoScroll();
-    runAI(fullMessage, folderPath, null, provider)
+    runAI(fullMessage, folderPath, null, provider, undefined, "ralph_prd")
       .then((processId) => {
         if (processId) {
           addGeneratingItem(
@@ -763,7 +773,7 @@ function App() {
         title={`Delete ${sessionManagement.deleteConfirmDialog.type === "session" ? "Chat" : "PRD Data"}?`}
         message={
           sessionManagement.deleteConfirmDialog.type === "session"
-            ? `Are you sure you want to delete "${sessionManagement.deleteConfirmDialog.name}"? This will delete the chat history but not any associated plan file.`
+            ? `Are you sure you want to delete "${sessionManagement.deleteConfirmDialog.name}"? This will delete the chat history.`
             : `Are you sure you want to delete the iteration data for "${sessionManagement.deleteConfirmDialog.name}"? This will delete all iterations and their chat history but not the PRD file.`
         }
         confirmLabel="Delete"
