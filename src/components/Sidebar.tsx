@@ -3,8 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { kebabToTitle } from "@/lib/formatting";
-import type { RalphIteration, GeneratingItem } from "@/types";
+import type { RalphIteration, GeneratingItem, Provider } from "@/types";
 import { FolderSelector } from "./FolderSelector";
+import { ProviderSelector } from "./ProviderSelector";
 
 interface FolderOption {
   path: string;
@@ -38,6 +39,9 @@ interface SidebarProps {
   onSelectFolder: (path: string) => void;
   onCloseFolder: (path: string) => void;
   onAddFolder: () => void;
+  // Provider props
+  provider: Provider;
+  onProviderChange: (provider: Provider) => void;
 }
 
 function SidebarToggleIcon() {
@@ -92,12 +96,6 @@ function StatusDot({ status }: { status: string }) {
   );
 }
 
-function LoadingDot() {
-  return (
-    <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse shrink-0" />
-  );
-}
-
 export function Sidebar({
   isOpen,
   onToggle,
@@ -123,6 +121,8 @@ export function Sidebar({
   onSelectFolder,
   onCloseFolder,
   onAddFolder,
+  provider,
+  onProviderChange,
 }: SidebarProps) {
   const [expandedPrds, setExpandedPrds] = useState<Set<string>>(new Set());
   const [prevIterationsKeys, setPrevIterationsKeys] = useState<string[]>([]);
@@ -226,14 +226,13 @@ export function Sidebar({
                         key={item.id}
                         onClick={() => onSelectGeneratingItem(item)}
                         className={cn(
-                          "w-full text-left px-2 py-1.5 text-sm rounded-md flex items-center gap-2 transition-colors",
+                          "w-full text-left px-2 py-1.5 text-sm rounded-md transition-colors truncate",
                           selectedGeneratingItemId === item.id
                             ? "bg-primary/15 text-foreground font-medium"
                             : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                         )}
                       >
-                        <LoadingDot />
-                        <span className="truncate italic">{item.displayName}</span>
+                        {item.displayName}
                       </button>
                     ))}
                     {plans.map((plan) => (
@@ -263,14 +262,13 @@ export function Sidebar({
                         key={item.id}
                         onClick={() => onSelectGeneratingItem(item)}
                         className={cn(
-                          "w-full text-left px-2 py-1.5 text-sm rounded-md flex items-center gap-2 transition-colors",
+                          "w-full text-left px-2 py-1.5 text-sm rounded-md transition-colors truncate",
                           selectedGeneratingItemId === item.id
                             ? "bg-primary/15 text-foreground font-medium"
                             : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                         )}
                       >
-                        <LoadingDot />
-                        <span className="truncate italic">{item.displayName}</span>
+                        {item.displayName}
                       </button>
                     ))}
                     {ralphPrds.map((prd) => {
@@ -337,10 +335,21 @@ export function Sidebar({
               </TabsContent>
             </Tabs>
           </div>
-          <div className="mt-auto px-3 py-2 border-t">
-            <span className="text-xs text-muted-foreground truncate block" title={folderPath}>
-              {folderPath}
-            </span>
+          <div className="mt-auto border-t">
+            <div className="px-3 py-2">
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
+                AI Provider
+              </div>
+              <ProviderSelector
+                value={provider}
+                onChange={onProviderChange}
+              />
+            </div>
+            <div className="px-3 py-2 border-t">
+              <span className="text-xs text-muted-foreground truncate block" title={folderPath}>
+                {folderPath}
+              </span>
+            </div>
           </div>
         </div>
       </aside>

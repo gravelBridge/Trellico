@@ -1,11 +1,10 @@
 use crate::commands::plans::get_plan_files;
 use crate::commands::ralph::get_ralph_prd_files;
-use crate::models::{PlanChangeEvent, PlansChangedEvent, RalphIterationsChangeEvent, RalphPrdChangeEvent};
+use crate::models::{PlanChangeEvent, PlansChangedEvent, RalphPrdChangeEvent};
 use crate::state::FOLDER_WATCHERS;
-use crate::utils::paths::{plans_dir, ralph_dir, ralph_iterations_path, trellico_dir};
+use crate::utils::paths::{plans_dir, ralph_dir};
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::fs;
-use std::path::PathBuf;
 use tauri::{AppHandle, Emitter};
 
 #[tauri::command]
@@ -195,61 +194,6 @@ pub fn watch_ralph_prds(app: AppHandle, folder_path: String) -> Result<(), Strin
         // Start watching
         if let Some(ref mut w) = fw.ralph_prd_watcher {
             w.watch(&ralph_path, RecursiveMode::Recursive)
-                .map_err(|e| format!("Failed to watch directory: {}", e))?;
-        }
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn watch_ralph_iterations(app: AppHandle, folder_path: String) -> Result<(), String> {
-    let iterations_path = ralph_iterations_path(&folder_path);
-    let trellico_path = trellico_dir(&folder_path);
-    let folder_path_for_closure = folder_path.clone();
-
-    // Create .trellico directory if it doesn't exist
-    if !trellico_path.exists() {
-        fs::create_dir_all(&trellico_path)
-            .map_err(|e| format!("Failed to create .trellico directory: {}", e))?;
-    }
-
-    let app_clone = app.clone();
-    let iterations_path_clone = PathBuf::from(&iterations_path);
-    let folder_path_clone = folder_path_for_closure.clone();
-
-    let watcher = RecommendedWatcher::new(
-        move |res: Result<notify::Event, notify::Error>| {
-            if let Ok(event) = res {
-                // Only react to changes to the iterations file
-                let is_iterations_file = event.paths.iter().any(|p| p == &iterations_path_clone);
-                if !is_iterations_file {
-                    return;
-                }
-
-                match event.kind {
-                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
-                        // Emit ralph-iterations-changed so the UI refreshes
-                        let _ = app_clone.emit("ralph-iterations-changed", RalphIterationsChangeEvent {
-                            folder_path: folder_path_clone.clone(),
-                        });
-                    }
-                    _ => {}
-                }
-            }
-        },
-        Config::default(),
-    )
-    .map_err(|e| format!("Failed to create watcher: {}", e))?;
-
-    // Store the watcher and start watching
-    if let Ok(mut folder_watchers) = FOLDER_WATCHERS.lock() {
-        let fw = folder_watchers.entry(folder_path.clone()).or_default();
-        fw.ralph_iterations_watcher = Some(watcher);
-
-        // Start watching the .trellico directory (since the file might not exist yet)
-        if let Some(ref mut w) = fw.ralph_iterations_watcher {
-            w.watch(&trellico_path, RecursiveMode::NonRecursive)
                 .map_err(|e| format!("Failed to watch directory: {}", e))?;
         }
     }

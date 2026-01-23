@@ -1,13 +1,12 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { ClaudeMessage, RalphIteration } from "@/types";
+import type { AIMessage, RalphIteration } from "@/types";
 import { getRalphPrompt } from "@/prompts";
 import { useMessageStore } from "@/contexts";
 
 interface UseRalphIterationsProps {
   folderPath: string | null;
-  runClaude: (message: string, folderPath: string, sessionId: string | null) => Promise<string>;
+  runAI: (message: string, folderPath: string, sessionId: string | null) => Promise<string>;
   onAutoSelectIteration?: () => void;
 }
 
@@ -22,7 +21,7 @@ interface UseRalphIterationsReturn {
   stopRalphing: () => void;
   selectIteration: (prdName: string, iterationNumber: number) => void;
   clearIterationSelection: () => void;
-  handleClaudeExit: (messages: ClaudeMessage[], sessionId: string) => void;
+  handleAIExit: (messages: AIMessage[], sessionId: string) => void;
   handleSessionIdReceived: (processId: string, sessionId: string) => void;
 }
 
@@ -31,7 +30,7 @@ type RalphStatus =
   | { status: "idle" }
   | { status: "running"; prdName: string; iterationNumber: number; processId: string };
 
-function isComplete(messages: ClaudeMessage[]): boolean {
+function isComplete(messages: AIMessage[]): boolean {
   // Check last few assistant messages for the stop signal
   const assistantMessages = messages.filter((m) => m.type === "assistant");
   for (const msg of assistantMessages.slice(-3)) {
@@ -58,7 +57,7 @@ function isComplete(messages: ClaudeMessage[]): boolean {
 
 export function useRalphIterations({
   folderPath,
-  runClaude,
+  runAI,
   onAutoSelectIteration,
 }: UseRalphIterationsProps): UseRalphIterationsReturn {
   const store = useMessageStore();
@@ -102,21 +101,18 @@ export function useRalphIterations({
     folderPathRef.current = folderPath;
   }, [folderPath]);
 
-  // Debounce ref for file change events
-  const reloadDebounceRef = useRef<number | null>(null);
-
   // Derived values from state machine
   const isRalphing = ralphState.status === "running";
   const ralphingPrd = ralphState.status === "running" ? ralphState.prdName : null;
   const currentIteration = ralphState.status === "running" ? ralphState.iterationNumber : null;
   const currentProcessId = ralphState.status === "running" ? ralphState.processId : null;
 
-  // Load all iterations from file (backend is source of truth)
+  // Load all iterations from database
   const loadAllIterations = useCallback(async () => {
     if (!folderPath) return;
     try {
       const allIterations = await invoke<Record<string, RalphIteration[]>>(
-        "get_all_ralph_iterations",
+        "db_get_all_ralph_iterations",
         { folderPath }
       );
       setIterations(allIterations);
@@ -125,68 +121,48 @@ export function useRalphIterations({
     }
   }, [folderPath]);
 
-  // Watch the iterations file and reload when it changes
+  // Load iterations from database when folder changes
   useEffect(() => {
     if (!folderPath) return;
-
     // Initial load (deferred to avoid synchronous setState in effect)
     queueMicrotask(() => loadAllIterations());
-
-    // Start watching the iterations file
-    invoke("watch_ralph_iterations", { folderPath }).catch((err) => {
-      console.error("Failed to start watching ralph iterations:", err);
-    });
-
-    // Listen for iterations file changes
-    let unlisten: UnlistenFn | null = null;
-    listen<{ folder_path: string }>("ralph-iterations-changed", (event) => {
-      // Only process events for the current folder
-      if (event.payload.folder_path !== folderPath) return;
-
-      // Debounce the reload
-      if (reloadDebounceRef.current) {
-        clearTimeout(reloadDebounceRef.current);
-      }
-      reloadDebounceRef.current = window.setTimeout(() => {
-        loadAllIterations();
-      }, 100);
-    }).then((fn) => {
-      unlisten = fn;
-    });
-
-    return () => {
-      if (unlisten) unlisten();
-      if (reloadDebounceRef.current) clearTimeout(reloadDebounceRef.current);
-    };
   }, [folderPath, loadAllIterations]);
 
   const createAndStartIteration = useCallback(
     async (prdName: string, iterationNumber: number): Promise<string | null> => {
       if (!folderPath) return null;
 
-      const now = new Date().toISOString();
-      const newIteration: RalphIteration = {
-        iteration_number: iterationNumber,
-        session_id: "", // Will be set once we get the session ID from Claude
-        status: "running",
-        created_at: now,
-      };
-
-      // Save iteration to backend (file watcher will update local state)
-      await invoke("save_ralph_iteration", {
+      // Save iteration to database
+      await invoke("db_save_ralph_iteration", {
         folderPath,
         prdName,
-        iteration: newIteration,
+        iterationNumber,
+        status: "running",
       });
+
+      // Update local state
+      setIterations((prev) => ({
+        ...prev,
+        [prdName]: [
+          ...(prev[prdName] || []),
+          {
+            iteration_number: iterationNumber,
+            session_id: "",
+            status: "running" as const,
+            created_at: new Date().toISOString(),
+            provider: null,
+          },
+        ],
+      }));
 
       // Build the prd path and run Claude
       const prdPath = `.trellico/ralph/${prdName}/prd.json`;
       const prompt = getRalphPrompt(prdPath);
 
-      const processId = await runClaude(prompt, folderPath, null);
+      const processId = await runAI(prompt, folderPath, null);
       return processId;
     },
-    [folderPath, runClaude]
+    [folderPath, runAI]
   );
 
   const startRalphing = useCallback(
@@ -196,7 +172,7 @@ export function useRalphIterations({
       // Load existing iterations to determine next iteration number
       let prdIterations: RalphIteration[] = [];
       try {
-        prdIterations = await invoke<RalphIteration[]>("get_ralph_iterations", {
+        prdIterations = await invoke<RalphIteration[]>("db_get_ralph_iterations", {
           folderPath,
           prdName,
         });
@@ -209,7 +185,7 @@ export function useRalphIterations({
       // If resuming from a stopped iteration, mark it as completed first
       const lastIteration = prdIterations[prdIterations.length - 1];
       if (lastIteration?.status === "stopped") {
-        await invoke("update_ralph_iteration_status", {
+        await invoke("db_update_ralph_iteration_status", {
           folderPath,
           prdName,
           iterationNumber: lastIteration.iteration_number,
@@ -250,15 +226,21 @@ export function useRalphIterations({
 
     if (!folderPath) return;
 
-    // Update the current iteration status to "stopped" in backend
+    // Update the current iteration status to "stopped" in database
     try {
-      await invoke("update_ralph_iteration_status", {
+      await invoke("db_update_ralph_iteration_status", {
         folderPath,
         prdName,
         iterationNumber,
         status: "stopped",
       });
-      // File watcher will update local state
+      // Update local state
+      setIterations((prev) => ({
+        ...prev,
+        [prdName]: (prev[prdName] || []).map((i) =>
+          i.iteration_number === iterationNumber ? { ...i, status: "stopped" as const } : i
+        ),
+      }));
     } catch (err) {
       console.error("Failed to update iteration status:", err);
     }
@@ -273,10 +255,10 @@ export function useRalphIterations({
 
       setSelectedIteration({ prd: prdName, iteration: iterationNumber });
 
-      // Fetch iteration directly from backend (local state may be stale after folder switch)
+      // Fetch iteration directly from database
       let iteration: RalphIteration | undefined;
       try {
-        const prdIterations = await invoke<RalphIteration[]>("get_ralph_iterations", {
+        const prdIterations = await invoke<RalphIteration[]>("db_get_ralph_iterations", {
           folderPath: capturedFolderPath,
           prdName,
         });
@@ -306,19 +288,18 @@ export function useRalphIterations({
           store.viewSession(sessionId);
         }
       } else if (iteration.session_id) {
-        // Always load from disk for completed iterations
-        // (with single-session cache, we don't keep old messages in memory)
+        // Load session history from database
         try {
-          const history = await invoke<ClaudeMessage[]>("load_session_history", {
-            folderPath: capturedFolderPath,
+          const history = await invoke<AIMessage[]>("db_get_session_messages", {
             sessionId: iteration.session_id,
           });
+
           // Abort if folder changed during async operation
           if (folderPathRef.current !== capturedFolderPath) return;
           // Skip the first user message (the hidden prompt)
           const filteredHistory =
             history.length > 0 && history[0].type === "user" ? history.slice(1) : history;
-          store.viewSession(iteration.session_id, filteredHistory);
+          store.viewSession(iteration.session_id, filteredHistory, iteration.provider ?? undefined);
         } catch (err) {
           console.error("Failed to load session history:", err);
         }
@@ -341,12 +322,19 @@ export function useRalphIterations({
 
       const { prdName, iterationNumber } = currentState;
       try {
-        await invoke("update_ralph_iteration_session_id", {
+        await invoke("db_update_ralph_iteration_session_id", {
           folderPath,
           prdName,
           iterationNumber,
           sessionId,
         });
+        // Update local state
+        setIterations((prev) => ({
+          ...prev,
+          [prdName]: (prev[prdName] || []).map((i): RalphIteration =>
+            i.iteration_number === iterationNumber ? { ...i, session_id: sessionId } : i
+          ),
+        }));
       } catch (err) {
         console.error("Failed to persist session ID:", err);
       }
@@ -354,9 +342,9 @@ export function useRalphIterations({
     [folderPath]
   );
 
-  // Handle Claude exit - called from useClaudeSession when claude-exit event fires
-  const handleClaudeExit = useCallback(
-    async (messages: ClaudeMessage[], sessionId: string) => {
+  // Handle AI exit - called from useAISession when ai-exit event fires
+  const handleAIExit = useCallback(
+    async (messages: AIMessage[], sessionId: string) => {
       // Read current state from ref (always up-to-date)
       const currentState = ralphStateRef.current;
       if (currentState.status !== "running") return;
@@ -371,9 +359,9 @@ export function useRalphIterations({
       if (!folderPath) return;
 
       try {
-        // Persist the session ID to the backend
+        // Persist the session ID to the database
         if (sessionId) {
-          await invoke("update_ralph_iteration_session_id", {
+          await invoke("db_update_ralph_iteration_session_id", {
             folderPath,
             prdName,
             iterationNumber,
@@ -384,18 +372,28 @@ export function useRalphIterations({
         // Check if complete
         if (isComplete(messages)) {
           // Mark iteration as completed and stop ralphing
-          await invoke("update_ralph_iteration_status", {
+          await invoke("db_update_ralph_iteration_status", {
             folderPath,
             prdName,
             iterationNumber,
             status: "completed",
           });
 
+          // Update local state
+          setIterations((prev) => ({
+            ...prev,
+            [prdName]: (prev[prdName] || []).map((i): RalphIteration =>
+              i.iteration_number === iterationNumber
+                ? { ...i, status: "completed", session_id: sessionId }
+                : i
+            ),
+          }));
+
           // Update state machine to idle
           setRalphState({ status: "idle" });
         } else {
           // Mark current iteration as completed (it finished without COMPLETE signal)
-          await invoke("update_ralph_iteration_status", {
+          await invoke("db_update_ralph_iteration_status", {
             folderPath,
             prdName,
             iterationNumber,
@@ -405,24 +403,36 @@ export function useRalphIterations({
           // Start next iteration
           const nextIterationNumber = iterationNumber + 1;
 
-          const now = new Date().toISOString();
-          const newIteration: RalphIteration = {
-            iteration_number: nextIterationNumber,
-            session_id: "",
-            status: "running",
-            created_at: now,
-          };
-
-          await invoke("save_ralph_iteration", {
+          await invoke("db_save_ralph_iteration", {
             folderPath,
             prdName,
-            iteration: newIteration,
+            iterationNumber: nextIterationNumber,
+            status: "running",
           });
+
+          // Update local state
+          setIterations((prev) => ({
+            ...prev,
+            [prdName]: [
+              ...(prev[prdName] || []).map((i) =>
+                i.iteration_number === iterationNumber
+                  ? { ...i, status: "completed" as const, session_id: sessionId }
+                  : i
+              ),
+              {
+                iteration_number: nextIterationNumber,
+                session_id: "",
+                status: "running" as const,
+                created_at: new Date().toISOString(),
+                provider: null,
+              },
+            ],
+          }));
 
           // Run Claude with new session
           const prdPath = `.trellico/ralph/${prdName}/prd.json`;
           const prompt = getRalphPrompt(prdPath);
-          const processId = await runClaude(prompt, folderPath, null);
+          const processId = await runAI(prompt, folderPath, null);
 
           // Update state machine with new iteration
           setRalphState({
@@ -437,12 +447,12 @@ export function useRalphIterations({
           onAutoSelectIteration?.();
         }
       } catch (err) {
-        console.error("Failed to handle Claude exit:", err);
+        console.error("Failed to handle AI exit:", err);
         // On error, reset to idle state
         setRalphState({ status: "idle" });
       }
     },
-    [folderPath, runClaude, onAutoSelectIteration, store]
+    [folderPath, runAI, onAutoSelectIteration, store]
   );
 
   return {
@@ -456,7 +466,7 @@ export function useRalphIterations({
     stopRalphing,
     selectIteration,
     clearIterationSelection,
-    handleClaudeExit,
+    handleAIExit,
     handleSessionIdReceived,
   };
 }

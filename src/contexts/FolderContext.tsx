@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useMemo } from "react";
-import type { GeneratingItem } from "@/types";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import type { GeneratingItem, Provider } from "@/types";
 import type { FolderState, FolderContextValue } from "./FolderContextTypes";
 import { FolderContext } from "./FolderContextInstance";
 
@@ -13,6 +14,7 @@ function createDefaultFolderState(path: string): FolderState {
     selectedRalphIteration: null,
     generatingItems: [],
     selectedGeneratingItemId: null,
+    provider: "claude_code",
   };
 }
 
@@ -142,6 +144,38 @@ export function FolderProvider({ children }: { children: React.ReactNode }) {
     [activeFolderPath, updateFolderState]
   );
 
+  const setProvider = useCallback(
+    (provider: Provider) => {
+      if (!activeFolderPath) return;
+      updateFolderState(activeFolderPath, { provider });
+      // Persist to database
+      invoke("db_set_folder_provider", { folderPath: activeFolderPath, provider }).catch((err) => {
+        console.error("Failed to save provider:", err);
+      });
+    },
+    [activeFolderPath, updateFolderState]
+  );
+
+  // Load provider from database when a folder is added
+  useEffect(() => {
+    if (!activeFolderPath) return;
+    const folder = folders.find((f) => f.path === activeFolderPath);
+    if (!folder) return;
+
+    // Only load if still using default provider (newly added folder)
+    if (folder.provider === "claude_code") {
+      invoke<Provider>("db_get_folder_provider", { folderPath: activeFolderPath })
+        .then((savedProvider) => {
+          if (savedProvider && savedProvider !== folder.provider) {
+            updateFolderState(activeFolderPath, { provider: savedProvider });
+          }
+        })
+        .catch(() => {
+          // Folder might not have a saved provider yet, use default
+        });
+    }
+  }, [activeFolderPath, folders, updateFolderState]);
+
   const value: FolderContextValue = {
     folders,
     activeFolderPath,
@@ -156,6 +190,7 @@ export function FolderProvider({ children }: { children: React.ReactNode }) {
     setSelectedRalphIteration,
     setGeneratingItems,
     setSelectedGeneratingItemId,
+    setProvider,
     getFolderState,
     updateFolderState,
   };

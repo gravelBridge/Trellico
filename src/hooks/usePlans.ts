@@ -1,15 +1,26 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { ClaudeMessage, SessionPlanLink } from "@/types";
+import type { AIMessage, FolderSession } from "@/types";
 import { useMessageStore } from "@/contexts";
+
+interface DbSessionLink {
+  id: number;
+  folder_path: string;
+  session_id: string;
+  file_name: string;
+  link_type: string;
+  created_at: string;
+  updated_at: string;
+  provider: string;
+}
 
 interface UsePlansOptions {
   folderPath: string | null;
-  onPlanCreated?: () => void;
+  onPlanLinked?: (sessionId: string) => void;
 }
 
-export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
+export function usePlans({ folderPath, onPlanLinked }: UsePlansOptions) {
   const store = useMessageStore();
   // Extract stable refs that don't change on every state update
   const { hasAnyRunning, getStateRef, viewSession } = store;
@@ -29,6 +40,7 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
   const selectPlanRef = useRef<((planName: string, autoLoadHistory?: boolean) => Promise<void>) | null>(null);
   const pendingLinkPlanRef = useRef<string | null>(null);
   const folderPathRef = useRef<string | null>(null);
+  const onPlanLinkedRef = useRef(onPlanLinked);
 
   // Clear state synchronously when folder changes (React pattern for adjusting state based on props)
   // Refs will be synced by existing useEffects
@@ -53,6 +65,10 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
   useEffect(() => {
     folderPathRef.current = folderPath;
   }, [folderPath]);
+
+  useEffect(() => {
+    onPlanLinkedRef.current = onPlanLinked;
+  }, [onPlanLinked]);
 
   // Define selectPlan first since handlePlansChange depends on it
   const selectPlan = useCallback(
@@ -82,9 +98,9 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
       // Check for linked session
       if (autoLoadHistory) {
         try {
-          const link = await invoke<SessionPlanLink | null>("get_link_by_plan", {
+          const link = await invoke<DbSessionLink | null>("db_get_link_by_plan", {
             folderPath: capturedFolderPath,
-            planFileName: planName,
+            planName,
           });
 
           // Abort if folder changed during async operation
@@ -93,17 +109,16 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
           if (link) {
             setLinkedSessionId(link.session_id);
 
-            // Load chat history and view it
+            // Load chat history from database
             try {
-              const history = await invoke<ClaudeMessage[]>("load_session_history", {
-                folderPath: capturedFolderPath,
+              const history = await invoke<AIMessage[]>("db_get_session_messages", {
                 sessionId: link.session_id,
               });
+
               // Abort if folder changed during async operation
               if (folderPathRef.current !== capturedFolderPath) return;
-              store.viewSession(link.session_id, history);
-            } catch (historyErr) {
-              console.error("Failed to load session history:", historyErr);
+              store.viewSession(link.session_id, history, link.provider as "claude_code" | "amp");
+            } catch {
               store.viewSession(null);
             }
           } else {
@@ -113,8 +128,7 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
               viewSession(null);
             }
           }
-        } catch (err) {
-          console.error("Failed to get plan link:", err);
+        } catch {
           setLinkedSessionId(null);
         }
       }
@@ -169,8 +183,8 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
           selectedPlanRef.current = newName;
           setSelectedPlan(newName);
 
-          // Update the session link
-          invoke("update_plan_link_filename", {
+          // Update the session link in database
+          invoke("db_update_plan_link_filename", {
             folderPath,
             oldName,
             newName,
@@ -188,23 +202,23 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
             const newPlan = added[0];
             selectPlanRef.current?.(newPlan, false);
 
-            // Notify that a plan was created (removes loading indicator)
-            onPlanCreated?.();
-
             // Link to current session using the currently viewed session
             const viewedSessionId = getStateRef().activeSessionId;
             if (viewedSessionId && !viewedSessionId.startsWith("__pending__")) {
-              // Session ID is already available, save link immediately
-              invoke("save_session_link", {
+              // Session ID is already available, save link to database
+              invoke("db_save_session_link", {
                 folderPath,
                 sessionId: viewedSessionId,
-                planFileName: newPlan,
+                fileName: newPlan,
+                linkType: "plan",
               })
                 .then(() => {
                   setLinkedSessionId(viewedSessionId);
+                  // Notify that the plan was linked (removes generating item)
+                  onPlanLinked?.(viewedSessionId);
                 })
-                .catch((err) => {
-                  console.error("Failed to save session link:", err);
+                .catch(() => {
+                  // Failed to save session link
                 });
             } else {
               // Session ID is still pending, store the plan name for linking later
@@ -230,7 +244,7 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
         console.error("Failed to load plans:", err);
       }
     },
-    [folderPath, reloadSelectedPlan, hasAnyRunning, getStateRef, onPlanCreated]
+    [folderPath, reloadSelectedPlan, hasAnyRunning, getStateRef, onPlanLinked]
   );
 
   const clearSelection = useCallback(() => {
@@ -278,24 +292,57 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
   // Handle session ID received - persist link immediately so we don't lose it
   const handleSessionIdReceived = useCallback(
     async (_processId: string, sessionId: string) => {
-      const pending = pendingLinkPlanRef.current;
       const folder = folderPathRef.current;
-      if (!pending || !folder) return;
+      if (!folder) return;
+
+      // Link to pending plan (new plan being created) or currently selected plan
+      const planToLink = pendingLinkPlanRef.current || selectedPlanRef.current;
+      if (!planToLink) return;
 
       try {
-        await invoke("save_session_link", {
+        await invoke("db_save_session_link", {
           folderPath: folder,
           sessionId,
-          planFileName: pending,
+          fileName: planToLink,
+          linkType: "plan",
         });
         setLinkedSessionId(sessionId);
         setPendingLinkPlan(null);
-      } catch (err) {
-        console.error("Failed to save session link:", err);
+        // Notify that the plan was linked (removes generating item)
+        onPlanLinkedRef.current?.(sessionId);
+      } catch {
+        // Failed to save session link
       }
     },
     []
   );
+
+  // Load the most recent session for the folder (when no plan is selected)
+  const loadRecentSession = useCallback(async () => {
+    if (!folderPath) return;
+
+    try {
+      const sessions = await invoke<FolderSession[]>("db_get_folder_sessions", {
+        folderPath,
+      });
+
+      // Get the most recent session (already ordered by created_at DESC)
+      const session = sessions[0];
+      if (session) {
+        // Load messages for this session
+        const history = await invoke<AIMessage[]>("db_get_session_messages", {
+          sessionId: session.id,
+        });
+        setLinkedSessionId(session.id);
+        store.viewSession(session.id, history, session.provider as "claude_code" | "amp");
+      } else {
+        setLinkedSessionId(null);
+        viewSession(null);
+      }
+    } catch {
+      // Failed to load recent session
+    }
+  }, [folderPath, store, viewSession]);
 
   return {
     plans,
@@ -306,5 +353,6 @@ export function usePlans({ folderPath, onPlanCreated }: UsePlansOptions) {
     selectPlan,
     clearSelection,
     handleSessionIdReceived,
+    loadRecentSession,
   };
 }

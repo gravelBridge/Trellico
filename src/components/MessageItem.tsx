@@ -1,10 +1,10 @@
 import { Streamdown } from "streamdown";
 import { code } from "@streamdown/code";
-import type { ClaudeMessage } from "@/types";
+import type { AIMessage } from "@/types";
 import { stripPromptPrefix } from "@/lib/formatting";
 
 interface MessageItemProps {
-  message: ClaudeMessage;
+  message: AIMessage;
   index: number;
 }
 

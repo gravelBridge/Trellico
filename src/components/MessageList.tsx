@@ -1,9 +1,9 @@
 import type { RefObject } from "react";
-import type { ClaudeMessage } from "@/types";
+import type { AIMessage } from "@/types";
 import { MessageItem } from "./MessageItem";
 
 interface MessageListProps {
-  messages: ClaudeMessage[];
+  messages: AIMessage[];
   scrollRef: RefObject<HTMLDivElement | null>;
   showScrollbar: boolean;
   onScroll: () => void;

@@ -1,18 +1,19 @@
 import React, { useCallback, useState, useSyncExternalStore } from "react";
-import type { ClaudeMessage } from "@/types";
+import type { AIMessage, Provider } from "@/types";
 import { MessageStoreContext, type MessageStoreState, type MessageStoreContextValue } from "./MessageStoreContext";
 
 // Action types
 type MessageAction =
-  | { type: "START_PROCESS"; processId: string; folderPath: string; sessionId?: string }
+  | { type: "START_PROCESS"; processId: string; folderPath: string; sessionId?: string; provider?: Provider }
   | { type: "SET_LIVE_SESSION_ID"; sessionId: string; processId: string }
   | { type: "END_PROCESS"; processId: string }
-  | { type: "ADD_MESSAGE"; message: ClaudeMessage; processId: string }
-  | { type: "VIEW_SESSION"; sessionId: string | null; messages?: ClaudeMessage[] }
+  | { type: "ADD_MESSAGE"; message: AIMessage; processId: string }
+  | { type: "VIEW_SESSION"; sessionId: string | null; messages?: AIMessage[]; provider?: Provider }
   | { type: "CLEAR_VIEW" };
 
 const initialState: MessageStoreState = {
   activeSessionId: null,
+  activeSessionProvider: null,
   messages: [],
   runningProcesses: {},
   runningSessions: {},
@@ -28,6 +29,8 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
       // If continuing the same session, preserve messages from runningSessions or current
       const existingMessages = state.runningSessions[sessionId] ||
         (action.sessionId === state.activeSessionId ? state.messages : []);
+      // Use provided provider, or preserve existing provider if continuing same session
+      const provider = action.provider ?? (action.sessionId === state.activeSessionId ? state.activeSessionProvider : null);
 
       return {
         ...state,
@@ -36,6 +39,7 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
           [action.processId]: {
             sessionId,
             folderPath: action.folderPath,
+            provider: provider ?? "claude_code",
           },
         },
         runningSessions: {
@@ -43,6 +47,7 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
           [sessionId]: existingMessages,
         },
         activeSessionId: sessionId,
+        activeSessionProvider: provider,
         messages: existingMessages,
       };
     }
@@ -133,6 +138,7 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
         return {
           ...state,
           activeSessionId: null,
+          activeSessionProvider: null,
           messages: [],
         };
       }
@@ -143,6 +149,7 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
         return {
           ...state,
           activeSessionId: action.sessionId,
+          activeSessionProvider: action.provider ?? state.activeSessionProvider,
           messages: runningMessages,
         };
       }
@@ -151,6 +158,7 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
       return {
         ...state,
         activeSessionId: action.sessionId,
+        activeSessionProvider: action.provider ?? null,
         messages: action.messages ?? [],
       };
     }
@@ -159,6 +167,7 @@ function messageReducer(state: MessageStoreState, action: MessageAction): Messag
       return {
         ...state,
         activeSessionId: null,
+        activeSessionProvider: null,
         messages: [],
       };
 
@@ -194,8 +203,8 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
 
   // Actions
   const startProcess = useCallback(
-    (processId: string, folderPath: string, sessionId?: string) => {
-      store.dispatch({ type: "START_PROCESS", processId, folderPath, sessionId });
+    (processId: string, folderPath: string, sessionId?: string, provider?: Provider) => {
+      store.dispatch({ type: "START_PROCESS", processId, folderPath, sessionId, provider });
     },
     [store]
   );
@@ -215,15 +224,15 @@ export function MessageStoreProvider({ children }: { children: React.ReactNode }
   );
 
   const addMessage = useCallback(
-    (message: ClaudeMessage, processId: string) => {
+    (message: AIMessage, processId: string) => {
       store.dispatch({ type: "ADD_MESSAGE", message, processId });
     },
     [store]
   );
 
   const viewSession = useCallback(
-    (sessionId: string | null, messages?: ClaudeMessage[]) => {
-      store.dispatch({ type: "VIEW_SESSION", sessionId, messages });
+    (sessionId: string | null, messages?: AIMessage[], provider?: Provider) => {
+      store.dispatch({ type: "VIEW_SESSION", sessionId, messages, provider });
     },
     [store]
   );

@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useEffect, useMemo } from "react";
-import type { GeneratingItem } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 
-import { useAutoScroll, useClaudeSession, usePlans, useRalphPrds, useRalphIterations } from "@/hooks";
+import { useAutoScroll, useAISession, usePlans, useRalphPrds, useRalphIterations } from "@/hooks";
+import type { AIMessage, GeneratingItem, FolderSession, Provider } from "@/types";
 import { useMessageStore, useFolderContext } from "@/contexts";
 import { Welcome } from "@/components/Welcome";
 import { Sidebar } from "@/components/Sidebar";
@@ -35,6 +35,7 @@ function App() {
     setSelectedPlan: setFolderSelectedPlan,
     setSelectedRalphPrd: setFolderSelectedRalphPrd,
     setSelectedRalphIteration: setFolderSelectedRalphIteration,
+    setProvider,
   } = folderContext;
 
   // Get current folder state with defaults
@@ -60,6 +61,7 @@ function App() {
     isOpen: false,
     path: null,
   });
+  const [providerMismatchError, setProviderMismatchError] = useState<string | null>(null);
 
   // Wrapper functions for local state setters that update folder context
   const setActiveTab = useCallback((tab: string) => {
@@ -70,10 +72,11 @@ function App() {
     setFolderSplitPosition(position);
   }, [setFolderSplitPosition]);
 
-  const addGeneratingItem = useCallback((item: Omit<GeneratingItem, "sessionId">) => {
+  const addGeneratingItem = useCallback((item: Omit<GeneratingItem, "sessionId">, itemProvider?: Provider) => {
     const fullItem: GeneratingItem = {
       ...item,
       sessionId: `__pending__${item.id}`,
+      provider: itemProvider,
     };
     // Add to beginning so newest appears first
     setGeneratingItems(prev => [fullItem, ...prev]);
@@ -97,25 +100,37 @@ function App() {
     setSelectedGeneratingItemId(null);
   }, [setGeneratingItems, setSelectedGeneratingItemId]);
 
+  const removeGeneratingItemBySessionId = useCallback((sessionId: string) => {
+    setGeneratingItems(prev => prev.filter(i => i.sessionId !== sessionId));
+    // Clear selection if the removed item was selected
+    const removedItem = generatingItems.find(i => i.sessionId === sessionId);
+    if (removedItem && selectedGeneratingItemId === removedItem.id) {
+      setSelectedGeneratingItemId(null);
+    }
+  }, [setGeneratingItems, setSelectedGeneratingItemId, generatingItems, selectedGeneratingItemId]);
+
   // Message store
   const store = useMessageStore();
   const messages = store.viewedMessages;
   const isViewingRunning = store.isViewingRunningSession;
 
   // Store ralph iterations handlers in refs that can be updated
-  const handleClaudeExitRef = React.useRef<((messages: import("@/types").ClaudeMessage[], sessionId: string) => void) | null>(null);
+  const handleAIExitRef = React.useRef<((messages: AIMessage[], sessionId: string) => void) | null>(null);
   const handleSessionIdReceivedRef = React.useRef<((processId: string, sessionId: string) => void) | null>(null);
 
-  // Claude session hook - callbacks use refs to get latest handlers
-  const claudeExitCallback = useCallback((msgs: import("@/types").ClaudeMessage[], sessionId: string) => {
-    handleClaudeExitRef.current?.(msgs, sessionId);
+  // Provider from folder context
+  const provider = activeFolder?.provider ?? "claude_code";
+
+  // AI session hook - callbacks use refs to get latest handlers
+  const aiExitCallback = useCallback((msgs: AIMessage[], sessionId: string) => {
+    handleAIExitRef.current?.(msgs, sessionId);
   }, []);
   const sessionIdReceivedCallback = useCallback((processId: string, sessionId: string) => {
     handleSessionIdReceivedRef.current?.(processId, sessionId);
   }, []);
 
-  const { runClaude, stopClaude, claudeError, clearClaudeError } = useClaudeSession({
-    onClaudeExit: claudeExitCallback,
+  const { runAI, stopAI, aiError, clearAIError } = useAISession({
+    onAIExit: aiExitCallback,
     onSessionIdReceived: sessionIdReceivedCallback,
   });
 
@@ -131,15 +146,24 @@ function App() {
     selectPlan,
     clearSelection: clearPlanSelection,
     handleSessionIdReceived: handlePlanSessionIdReceived,
+    loadRecentSession,
   } = usePlans({
     folderPath,
-    onPlanCreated: useCallback(() => removeGeneratingItemByType("plan"), [removeGeneratingItemByType]),
+    onPlanLinked: useCallback((sessionId: string) => removeGeneratingItemBySessionId(sessionId), [removeGeneratingItemBySessionId]),
   });
 
   // Ralph iterations hook (declared early for callback)
+  // Create a wrapper for runAI that includes the current provider
+  const runAIForRalph = useCallback(
+    (message: string, folderPath: string, sessionId: string | null) => {
+      return runAI(message, folderPath, sessionId, provider);
+    },
+    [runAI, provider]
+  );
+
   const ralphIterations = useRalphIterations({
     folderPath,
-    runClaude,
+    runAI: runAIForRalph,
     onAutoSelectIteration: useCallback(() => setActiveTab("ralph"), [setActiveTab]),
   });
 
@@ -183,8 +207,8 @@ function App() {
 
   // Update the refs with the current handlers
   useEffect(() => {
-    handleClaudeExitRef.current = ralphIterations.handleClaudeExit;
-  }, [ralphIterations.handleClaudeExit]);
+    handleAIExitRef.current = ralphIterations.handleAIExit;
+  }, [ralphIterations.handleAIExit]);
   const handleRalphSessionIdReceived = ralphIterations.handleSessionIdReceived;
   useEffect(() => {
     handleSessionIdReceivedRef.current = (processId: string, sessionId: string) => {
@@ -221,6 +245,7 @@ function App() {
   const clearRalphSelectionRef = React.useRef(clearRalphSelection);
   const storeRef = React.useRef(store);
   const resetAutoScrollRef = React.useRef(resetAutoScroll);
+  const loadRecentSessionRef = React.useRef(loadRecentSession);
 
   useEffect(() => {
     selectPlanRef.current = selectPlan;
@@ -230,7 +255,8 @@ function App() {
     clearRalphSelectionRef.current = clearRalphSelection;
     storeRef.current = store;
     resetAutoScrollRef.current = resetAutoScroll;
-  }, [selectPlan, selectRalphPrd, ralphIterations.selectIteration, clearPlanSelection, clearRalphSelection, store, resetAutoScroll]);
+    loadRecentSessionRef.current = loadRecentSession;
+  }, [selectPlan, selectRalphPrd, ralphIterations.selectIteration, clearPlanSelection, clearRalphSelection, store, resetAutoScroll, loadRecentSession]);
 
   // Restore selections when switching folders
   useEffect(() => {
@@ -255,18 +281,17 @@ function App() {
         const sessionId = item.sessionId;
         const runningMessages = storeRef.current.getRunningSessionMessages(sessionId);
         if (runningMessages) {
-          storeRef.current.viewSession(sessionId);
+          storeRef.current.viewSession(sessionId, undefined, item.provider);
         } else {
-          invoke<import("@/types").ClaudeMessage[]>("load_session_history", {
-            folderPath,
+          invoke<AIMessage[]>("db_get_session_messages", {
             sessionId,
           }).then((history) => {
             if (isActive) {
-              storeRef.current.viewSession(sessionId, history);
+              storeRef.current.viewSession(sessionId, history, item.provider);
             }
           }).catch(() => {
             if (isActive) {
-              storeRef.current.viewSession(sessionId, []);
+              storeRef.current.viewSession(sessionId, [], item.provider);
             }
           });
         }
@@ -286,11 +311,12 @@ function App() {
       // Restore plan selection (loads plan content and session)
       selectPlanRef.current(savedSelectedPlan);
     } else {
-      // Nothing selected - clear everything but preserve the active tab
+      // Nothing selected - clear selections and load recent session for this folder
       clearPlanSelectionRef.current();
       clearRalphSelectionRef.current();
       clearIterationSelectionRef.current();
-      storeRef.current.viewSession(null);
+      // Load the most recent session for this folder instead of clearing
+      loadRecentSessionRef.current();
     }
     resetAutoScrollRef.current();
 
@@ -298,6 +324,98 @@ function App() {
       isActive = false;
     };
   }, [folderPath, selectedGeneratingItemId, generatingItems, savedSelectedRalphIteration, savedSelectedRalphPrd, savedSelectedPlan, activeTab]);
+
+  // Load recent session on initial folder load (when no plan/prd is selected)
+  // Track the folder path we've done initial load for (not just a boolean)
+  // This allows initial load to run again when switching to a completely new folder after closing all
+  const initialLoadFolderRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    // Reset when all folders are closed
+    if (!folderPath) {
+      initialLoadFolderRef.current = null;
+      return;
+    }
+
+    // Skip if we've already done initial load for this folder
+    if (initialLoadFolderRef.current === folderPath) return;
+    initialLoadFolderRef.current = folderPath;
+
+    // Only load if nothing is selected
+    if (!savedSelectedPlan && !savedSelectedRalphPrd && !savedSelectedRalphIteration) {
+      loadRecentSession();
+    }
+  }, [folderPath, savedSelectedPlan, savedSelectedRalphPrd, savedSelectedRalphIteration, loadRecentSession]);
+
+  // Load unlinked sessions (sessions without a plan) when folder changes
+  const unlinkedSessionsLoadedRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (!folderPath) {
+      unlinkedSessionsLoadedRef.current = null;
+      return;
+    }
+
+    // Skip if we've already loaded for this folder
+    if (unlinkedSessionsLoadedRef.current === folderPath) return;
+    unlinkedSessionsLoadedRef.current = folderPath;
+
+    let isActive = true;
+
+    async function loadUnlinkedSessions() {
+      try {
+        const sessions = await invoke<FolderSession[]>('db_get_folder_sessions', {
+          folderPath,
+        });
+
+        // Filter for sessions without a linked plan
+        const unlinkedSessions = sessions.filter(s => !s.linked_plan);
+        if (!isActive || unlinkedSessions.length === 0) return;
+
+        // For each session, get the first user message to use as display name
+        const items: GeneratingItem[] = [];
+        for (const session of unlinkedSessions) {
+          // Check if we already have a generating item for this session
+          const existing = generatingItemsRef.current.find(g => g.sessionId === session.id);
+          if (existing) continue;
+
+          // Get first message to use as display name
+          let displayName = "Plan Chat";
+          try {
+            const messages = await invoke<AIMessage[]>('db_get_session_messages', {
+              sessionId: session.id,
+            });
+            const firstUserMsg = messages.find(m => m.type === "user");
+            if (firstUserMsg?.content) {
+              // Truncate long messages
+              const content = typeof firstUserMsg.content === 'string' ? firstUserMsg.content : '';
+              displayName = content.length > 50 ? content.slice(0, 50) + "..." : content;
+            }
+          } catch {
+            // Failed to get messages, use default display name
+          }
+
+          items.push({
+            id: session.id,
+            displayName,
+            type: "plan",
+            sessionId: session.id,
+            provider: session.provider as Provider,
+          });
+        }
+
+        if (isActive && items.length > 0) {
+          setGeneratingItems(prev => [...items, ...prev]);
+        }
+      } catch {
+        // Failed to load sessions
+      }
+    }
+
+    loadUnlinkedSessions();
+
+    return () => {
+      isActive = false;
+    };
+  }, [folderPath, setGeneratingItems]);
 
   // Handle start ralphing
   function handleStartRalphing() {
@@ -315,7 +433,7 @@ function App() {
     if (activeSessionId) {
       const processId = store.getSessionProcessId(activeSessionId);
       if (processId) {
-        stopClaude(processId);
+        stopAI(processId);
       }
     }
 
@@ -373,7 +491,7 @@ function App() {
     // Stop all running processes in this folder
     const processes = store.getFolderProcesses(path);
     for (const processId of processes) {
-      await stopClaude(processId);
+      await stopAI(processId);
     }
     // Stop watching the folder
     await invoke("stop_watching_folder", { folderPath: path });
@@ -389,6 +507,13 @@ function App() {
 
     const isNewSession = !store.state.activeSessionId;
 
+    // Check provider match when continuing an existing session
+    if (!isNewSession && store.state.activeSessionProvider && store.state.activeSessionProvider !== provider) {
+      const sessionProvider = store.state.activeSessionProvider === "claude_code" ? "Claude Code" : "Amp";
+      setProviderMismatchError(`This session was started with ${sessionProvider}. Please switch to ${sessionProvider} to continue.`);
+      return;
+    }
+
     resetAutoScroll();
 
     // Only prepend prompt for new sessions in plans tab
@@ -397,7 +522,7 @@ function App() {
 
     try {
       // Pass the user's message to display (always show what the user typed)
-      const processId = await runClaude(fullMessage, folderPath, store.state.activeSessionId, message);
+      const processId = await runAI(fullMessage, folderPath, store.state.activeSessionId, provider, message);
 
       // Add generating item for new plan sessions
       if (isNewSession && activeTab === "plans" && processId) {
@@ -405,7 +530,7 @@ function App() {
           id: processId,
           displayName: message.trim(),
           type: "plan",
-        });
+        }, provider);
       }
     } catch {
       // Error already handled in hook
@@ -441,17 +566,17 @@ function App() {
     // Compose message with ralph prompt + plan filename instruction + plan content
     const fullMessage = `${ralphFormatPrompt}\n\nPlan filename: ${planFileName}.md\nOutput the JSON to: .trellico/ralph/${planFileName}/prd.json\n\n${planContent}`;
 
-    // Start Claude session (no user message shown - the prompt is hidden)
+    // Start AI session (no user message shown - the prompt is hidden)
     resetAutoScroll();
 
-    runClaude(fullMessage, folderPath, null).then((processId) => {
+    runAI(fullMessage, folderPath, null, provider).then((processId) => {
       if (processId) {
         addGeneratingItem({
           id: processId,
           displayName: `Converting ${kebabToTitle(planFileName)}...`,
           type: "ralph_prd",
           targetName: planFileName,
-        });
+        }, provider);
       }
     }).catch(() => {
       // Error already handled in hook
@@ -510,17 +635,16 @@ function App() {
       // For completed sessions, try to load from store's running sessions first
       const runningMessages = store.getRunningSessionMessages(sessionId);
       if (runningMessages) {
-        store.viewSession(sessionId);
+        store.viewSession(sessionId, undefined, item.provider);
       } else {
-        // Process has ended - load session history from disk
-        invoke<import("@/types").ClaudeMessage[]>("load_session_history", {
-          folderPath,
+        // Process has ended - load session history from database
+        invoke<AIMessage[]>("db_get_session_messages", {
           sessionId,
         }).then((history) => {
-          store.viewSession(sessionId, history);
+          store.viewSession(sessionId, history, item.provider);
         }).catch(() => {
           // Session might not exist yet or failed - just view empty
-          store.viewSession(sessionId, []);
+          store.viewSession(sessionId, [], item.provider);
         });
       }
       // Switch to appropriate tab
@@ -547,15 +671,14 @@ function App() {
       const sessionId = selectedGeneratingItem.sessionId;
       const runningMessages = store.getRunningSessionMessages(sessionId);
       if (runningMessages) {
-        store.viewSession(sessionId);
+        store.viewSession(sessionId, undefined, selectedGeneratingItem.provider);
       } else {
-        invoke<import("@/types").ClaudeMessage[]>("load_session_history", {
-          folderPath,
+        invoke<AIMessage[]>("db_get_session_messages", {
           sessionId,
         }).then((history) => {
-          store.viewSession(sessionId, history);
+          store.viewSession(sessionId, history, selectedGeneratingItem.provider);
         }).catch(() => {
-          store.viewSession(sessionId, []);
+          store.viewSession(sessionId, [], selectedGeneratingItem.provider);
         });
       }
       return;
@@ -647,6 +770,9 @@ function App() {
         onSelectFolder={setActiveFolder}
         onCloseFolder={handleCloseFolder}
         onAddFolder={selectFolder}
+        // Provider props
+        provider={provider}
+        onProviderChange={setProvider}
       />
 
       {/* Main content */}
@@ -660,7 +786,7 @@ function App() {
             inputValue={message}
             onInputChange={setMessage}
             onSubmit={handleSubmit}
-            onStop={() => stopClaude()}
+            onStop={() => stopAI()}
             isRunning={isViewingRunning}
             linkedSessionId={linkedSessionId}
             sidebarOpen={sidebarOpen}
@@ -701,7 +827,7 @@ function App() {
             inputValue={message}
             onInputChange={setMessage}
             onSubmit={handleSubmit}
-            onStop={() => stopClaude()}
+            onStop={() => stopAI()}
             isRunning={isViewingRunning}
             activeTab={activeTab}
           />
@@ -739,7 +865,7 @@ function App() {
                   value={message}
                   onChange={setMessage}
                   onSubmit={handleSubmit}
-                  onStop={() => stopClaude()}
+                  onStop={() => stopAI()}
                   isRunning={isViewingRunning}
                   placeholder={store.state.activeSessionId ? "Follow up..." : "Ask anything..."}
                   rows={3}
@@ -767,12 +893,20 @@ function App() {
         onCancel={() => setCloseFolderDialog({ isOpen: false, path: null })}
       />
 
-      {/* Claude error dialog */}
+      {/* AI Provider error dialog */}
       <ErrorDialog
-        isOpen={claudeError !== null}
-        title={claudeError?.type === "not_installed" ? "Claude Not Installed" : claudeError?.type === "not_logged_in" ? "Claude Not Logged In" : "Claude Error"}
-        message={claudeError?.message ?? ""}
-        onClose={clearClaudeError}
+        isOpen={aiError !== null}
+        title={aiError?.type === "not_installed" ? "Provider Not Installed" : aiError?.type === "not_logged_in" ? "Provider Not Logged In" : "Provider Error"}
+        message={aiError?.authInstructions ? `${aiError.message}\n\n${aiError.authInstructions}` : aiError?.message ?? ""}
+        onClose={clearAIError}
+      />
+
+      {/* Provider mismatch error dialog */}
+      <ErrorDialog
+        isOpen={providerMismatchError !== null}
+        title="Provider Mismatch"
+        message={providerMismatchError ?? ""}
+        onClose={() => setProviderMismatchError(null)}
       />
 
       {/* Auto-update checker */}

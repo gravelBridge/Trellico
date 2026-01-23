@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import type { ClaudeMessage } from "@/types";
+import type { AIMessage } from "@/types";
 import { MessageList } from "./MessageList";
 import { PromptInput } from "./PromptInput";
 import { cn } from "@/lib/utils";
@@ -27,7 +27,7 @@ function FlowingIndicator() {
 }
 
 interface ChatPanelProps {
-  messages: ClaudeMessage[];
+  messages: AIMessage[];
   scrollRef: RefObject<HTMLDivElement | null>;
   showScrollbar: boolean;
   onScroll: () => void;

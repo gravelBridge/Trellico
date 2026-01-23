@@ -1,12 +1,12 @@
 import type { RefObject } from "react";
-import type { ClaudeMessage } from "@/types";
+import type { AIMessage } from "@/types";
 import { SplitView } from "./SplitView";
 import { ChatPanel } from "./ChatPanel";
 import { ContentPanel } from "./ContentPanel";
 import { Button } from "@/components/ui/button";
 
 interface PlanSplitViewProps {
-  messages: ClaudeMessage[];
+  messages: AIMessage[];
   scrollRef: RefObject<HTMLDivElement | null>;
   showScrollbar: boolean;
   onScroll: () => void;

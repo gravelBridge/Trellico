@@ -1,5 +1,5 @@
 export { useAutoScroll } from "./useAutoScroll";
-export { useClaudeSession } from "./useClaudeSession";
+export { useAISession } from "./useAISession";
 export { useMessageStore } from "./useMessageStore";
 export { usePlans } from "./usePlans";
 export { useRalphPrds } from "./useRalphPrds";
