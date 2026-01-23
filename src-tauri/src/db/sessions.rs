@@ -12,6 +12,7 @@ pub struct FolderSession {
     pub created_at: String,
     pub linked_plan: Option<String>,
     pub linked_ralph_prd: Option<String>,
+    pub linked_ralph_iteration: Option<String>,
 }
 
 /// Create a new session
@@ -35,7 +36,7 @@ pub fn create_session(
     Ok(())
 }
 
-/// Get all sessions for a folder with their linked plan and ralph PRD (if any)
+/// Get all sessions for a folder with their linked plan, ralph PRD, and ralph iteration (if any)
 pub fn get_folder_sessions(
     conn: &DbConnection,
     folder_path: &str,
@@ -44,10 +45,12 @@ pub fn get_folder_sessions(
 
     let mut stmt = conn
         .prepare(
-            "SELECT s.id, s.provider, s.session_type, s.display_name, s.created_at, sl_plan.file_name, sl_ralph.file_name
+            "SELECT s.id, s.provider, s.session_type, s.display_name, s.created_at,
+                    sl_plan.file_name, sl_ralph.file_name, ri.prd_name
              FROM sessions s
              LEFT JOIN session_links sl_plan ON s.id = sl_plan.session_id AND sl_plan.link_type = 'plan'
              LEFT JOIN session_links sl_ralph ON s.id = sl_ralph.session_id AND sl_ralph.link_type = 'ralph_prd'
+             LEFT JOIN ralph_iterations ri ON s.id = ri.session_id AND ri.folder_path = s.folder_path
              WHERE s.folder_path = ?1
              ORDER BY s.created_at DESC",
         )
@@ -63,6 +66,7 @@ pub fn get_folder_sessions(
                 created_at: row.get(4)?,
                 linked_plan: row.get(5)?,
                 linked_ralph_prd: row.get(6)?,
+                linked_ralph_iteration: row.get(7)?,
             })
         })
         .map_err(|e| format!("Failed to query sessions: {}", e))?

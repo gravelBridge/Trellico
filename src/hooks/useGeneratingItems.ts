@@ -104,8 +104,10 @@ export function useGeneratingItems({
           folderPath,
         });
 
-        // Filter for sessions without a linked plan or ralph PRD
-        const unlinkedSessions = sessions.filter((s) => !s.linked_plan && !s.linked_ralph_prd);
+        // Filter for sessions without a linked plan, ralph PRD, or ralph iteration
+        const unlinkedSessions = sessions.filter(
+          (s) => !s.linked_plan && !s.linked_ralph_prd && !s.linked_ralph_iteration
+        );
         if (!isActive || unlinkedSessions.length === 0) return;
 
         // For each session, get the first user message to use as display name

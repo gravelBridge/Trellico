@@ -27,6 +27,7 @@ export interface FolderSession {
   created_at: string;
   linked_plan: string | null;
   linked_ralph_prd: string | null;
+  linked_ralph_iteration: string | null;
 }
 
 export interface SessionPlanLink {

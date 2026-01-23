@@ -39,5 +39,10 @@ pub fn init_db() -> Result<DbConnection, String> {
     // Run migrations
     schema::run_migrations(&conn)?;
 
-    Ok(Arc::new(Mutex::new(conn)))
+    let db_conn = Arc::new(Mutex::new(conn));
+
+    // Mark any running iterations as stopped (app may have quit unexpectedly)
+    iterations::mark_running_iterations_stopped(&db_conn)?;
+
+    Ok(db_conn)
 }

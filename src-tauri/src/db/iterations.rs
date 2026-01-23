@@ -159,6 +159,19 @@ pub fn get_all_ralph_iterations(
     Ok(result)
 }
 
+/// Mark all running iterations as stopped (called on app startup)
+pub fn mark_running_iterations_stopped(conn: &DbConnection) -> Result<(), String> {
+    let conn = conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+    conn.execute(
+        "UPDATE ralph_iterations SET status = 'stopped' WHERE status = 'running'",
+        [],
+    )
+    .map_err(|e| format!("Failed to mark running iterations as stopped: {}", e))?;
+
+    Ok(())
+}
+
 /// Delete all iterations for a PRD (and their associated sessions)
 pub fn delete_prd_iterations(
     conn: &DbConnection,

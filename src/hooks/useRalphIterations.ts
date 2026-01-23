@@ -208,17 +208,6 @@ export function useRalphIterations({
 
       const nextIterationNumber = prdIterations.length + 1;
 
-      // If resuming from a stopped iteration, mark it as completed first
-      const lastIteration = prdIterations[prdIterations.length - 1];
-      if (lastIteration?.status === "stopped") {
-        await invoke("db_update_ralph_iteration_status", {
-          folderPath,
-          prdName,
-          iterationNumber: lastIteration.iteration_number,
-          status: "completed",
-        });
-      }
-
       // Clear selection before starting
       setSelectedIteration(null);
 

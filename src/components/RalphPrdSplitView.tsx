@@ -56,31 +56,37 @@ export function RalphPrdSplitView({
   const leftPanelCollapsed = splitPosition < 6;
   const rightPanelNeedsPadding = !sidebarOpen && leftPanelCollapsed;
 
-  // Check if ralphing is completed (last iteration is "completed" and not currently ralphing)
+  // Check iteration states
   const lastIteration = iterations[iterations.length - 1];
+  const isRalphingThisPrd = isRalphing && ralphingPrd === selectedRalphPrd;
   const isRalphingCompleted =
     !isRalphing && lastIteration?.status === "completed";
+  // Treat both "stopped" and stale "running" (state machine idle) as resumable
+  const canResume =
+    !isRalphing &&
+    (lastIteration?.status === "stopped" || lastIteration?.status === "running");
 
-  // Check if there's an incomplete loop (last iteration is "stopped" - needs resume, not fresh start)
-  const hasIncompleteLoop =
-    !isRalphing && lastIteration?.status === "stopped";
-
-  // Determine if button should be disabled - when running, ralphing, completed, or stopped
-  const isRalphingThisPrd = isRalphing && ralphingPrd === selectedRalphPrd;
-  const buttonDisabled =
-    isRunning || isRalphingThisPrd || isRalphingCompleted || hasIncompleteLoop;
-
-  // Check if viewing a stopped iteration that is the latest (can resume)
+  // Check if viewing a stopped/running iteration that is the latest (can resume from iteration view)
   const selectedIteration = selectedIterationNumber
     ? iterations.find((i) => i.iteration_number === selectedIterationNumber)
     : null;
   const isLatestIteration =
     selectedIterationNumber === lastIteration?.iteration_number;
-  const canResume =
+  const canResumeFromIteration =
     isViewingIteration &&
     isLatestIteration &&
-    selectedIteration?.status === "stopped" &&
+    (selectedIteration?.status === "stopped" || selectedIteration?.status === "running") &&
     !isRalphing;
+
+  // Determine button state
+  const buttonDisabled = isRunning || isRalphingThisPrd || isRalphingCompleted;
+  const buttonText = isRalphingThisPrd
+    ? "In Progress"
+    : isRalphingCompleted
+      ? "Completed"
+      : canResume
+        ? "Resume Ralphing!"
+        : "Start Ralphing!";
 
   return (
     <SplitView
@@ -114,13 +120,9 @@ export function RalphPrdSplitView({
                 onClick={onStartRalphing}
                 disabled={buttonDisabled}
               >
-                {isRalphingThisPrd || hasIncompleteLoop
-                  ? "In Progress"
-                  : isRalphingCompleted
-                    ? "Completed"
-                    : "Start Ralphing!"}
+                {buttonText}
               </Button>
-            ) : canResume ? (
+            ) : canResumeFromIteration ? (
               <Button size="sm" onClick={onStartRalphing} disabled={isRunning}>
                 Resume Ralphing!
               </Button>
