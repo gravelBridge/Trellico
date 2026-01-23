@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { ClaudeMessage, SessionPlanLink } from "@/types";
+import type { AIMessage, SessionPlanLink } from "@/types";
 import { useMessageStore } from "@/contexts";
 
 interface UseRalphPrdsOptions {
@@ -57,10 +57,11 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
 
     const sessionId = getSessionIdForPrd?.(pendingLinkPrd);
     if (sessionId && !sessionId.startsWith("__pending__")) {
-      invoke("save_ralph_link", {
+      invoke("db_save_session_link", {
         folderPath,
         sessionId,
-        prdFileName: pendingLinkPrd,
+        fileName: pendingLinkPrd,
+        linkType: "ralph_prd",
       })
         .then(() => {
           setRalphLinkedSessionId(sessionId);
@@ -96,16 +97,15 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
 
       if (autoLoadHistory) {
         try {
-          const link = await invoke<SessionPlanLink | null>("get_link_by_ralph_prd", {
+          const link = await invoke<SessionPlanLink | null>("db_get_link_by_ralph_prd", {
             folderPath: capturedFolderPath,
-            prdFileName: prdName,
+            prdName,
           });
           // Abort if folder changed during async operation
           if (folderPathRef.current !== capturedFolderPath) return;
           if (link) {
             setRalphLinkedSessionId(link.session_id);
-            const history = await invoke<ClaudeMessage[]>("load_session_history", {
-              folderPath: capturedFolderPath,
+            const history = await invoke<AIMessage[]>("db_get_session_messages", {
               sessionId: link.session_id,
             });
             // Abort if folder changed during async operation
@@ -113,7 +113,7 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
             // Skip the first user message (the hidden prompt)
             const filteredHistory =
               history.length > 0 && history[0].type === "user" ? history.slice(1) : history;
-            viewSession(link.session_id, filteredHistory);
+            viewSession(link.session_id, filteredHistory, link.provider);
           } else {
             setRalphLinkedSessionId(null);
             if (!hasAnyRunning()) {
@@ -149,29 +149,34 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
 
         if (isInitialLoad) return;
 
-        // Auto-select newly created PRD if Claude is running (creating it)
-        if (added.length === 1 && removed.length === 0 && hasAnyRunning()) {
-          selectRalphPrdRef.current?.(added[0], false);
-          onAutoSelectPrd?.(added[0]);
-          // Notify that a PRD was created (removes loading indicator)
-          onPrdCreated?.();
-          // Link session to this PRD - use the callback to get the correct session ID
+        // Handle newly created PRD
+        if (added.length === 1 && removed.length === 0) {
+          // Try to link session to this PRD - use the callback to get the correct session ID
           const sessionId = getSessionIdForPrd?.(added[0]);
           if (sessionId && !sessionId.startsWith("__pending__")) {
             // Session ID is already available, save link immediately
-            invoke("save_ralph_link", {
+            invoke("db_save_session_link", {
               folderPath,
               sessionId,
-              prdFileName: added[0],
+              fileName: added[0],
+              linkType: "ralph_prd",
             })
               .then(() => {
                 setRalphLinkedSessionId(sessionId);
               })
               .catch(console.error);
-          } else {
+            // Auto-select and notify only if we have a matching session
+            selectRalphPrdRef.current?.(added[0], false);
+            onAutoSelectPrd?.(added[0]);
+            onPrdCreated?.();
+          } else if (sessionId) {
             // Session ID is still pending, store the PRD name for linking later
             setPendingLinkPrd(added[0]);
+            selectRalphPrdRef.current?.(added[0], false);
+            onAutoSelectPrd?.(added[0]);
+            onPrdCreated?.();
           }
+          // If no sessionId match, this PRD was created manually - don't auto-select
         }
 
         // If selected was removed, clear selection
@@ -184,7 +189,7 @@ export function useRalphPrds({ folderPath, onAutoSelectPrd, onPrdCreated, getSes
         console.error("Failed to load ralph prds:", err);
       }
     },
-    [folderPath, hasAnyRunning, onAutoSelectPrd, onPrdCreated, getSessionIdForPrd]
+    [folderPath, onAutoSelectPrd, onPrdCreated, getSessionIdForPrd]
   );
 
   const clearSelection = useCallback(() => {

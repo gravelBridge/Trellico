@@ -79,14 +79,14 @@ Only update AGENTS.md/CLAUDE.md if you have **genuinely reusable knowledge** tha
 
 ## Browser Testing (Required for Frontend Stories)
 
-For any story that changes UI, you MUST verify it works in the browser (if the agent-browser skill is present):
+For any story that changes UI, you MUST verify it works in the browser (if there is a skill present to use the browser):
 
-1. Load the \`agent-browser\` skill (if not present, note it and skip browser testing)
+1. Load a browser control skill (if not present, note it and skip browser testing)
 2. Navigate to the relevant page
 3. Verify the UI changes work as expected
 4. Take a screenshot if helpful for the progress log
 
-A frontend story is NOT complete until browser verification passes (unless the agent-browser skill is not present).
+A frontend story is NOT complete until browser verification passes (unless a browser control skill is not present).
 
 ## Stop Condition
 

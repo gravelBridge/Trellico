@@ -1,7 +1,7 @@
 import { useRef, useCallback, useEffect } from "react";
-import type { ClaudeMessage } from "@/types";
+import type { AIMessage } from "@/types";
 
-export function useAutoScroll(messages: ClaudeMessage[]) {
+export function useAutoScroll(messages: AIMessage[]) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const shouldAutoScroll = useRef(true);
   const savedScrollPosition = useRef<number>(0);

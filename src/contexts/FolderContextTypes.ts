@@ -1,4 +1,4 @@
-import type { GeneratingItem } from "@/types";
+import type { GeneratingItem, Provider } from "@/types";
 
 // Per-folder UI state that gets preserved when switching folders
 export interface FolderState {
@@ -10,6 +10,7 @@ export interface FolderState {
   selectedRalphIteration: { prd: string; iteration: number } | null;
   generatingItems: GeneratingItem[];
   selectedGeneratingItemId: string | null;
+  provider: Provider;
 }
 
 // Overall multi-folder state
@@ -38,6 +39,7 @@ export interface FolderContextValue {
   setSelectedRalphIteration: (iteration: { prd: string; iteration: number } | null) => void;
   setGeneratingItems: (items: GeneratingItem[] | ((prev: GeneratingItem[]) => GeneratingItem[])) => void;
   setSelectedGeneratingItemId: (id: string | null) => void;
+  setProvider: (provider: Provider) => void;
 
   // Helpers
   getFolderState: (path: string) => FolderState | undefined;

@@ -16,14 +16,17 @@ Trellico is a Tauri MacOS app that allows you to run Ralph loops—long-running 
 
 - **Plan Management** - Create and organize development plans
 - **Ralph Loops** - Execute iterative AI development cycles with story-by-story tracking
+- **Multi-Provider Support** - Choose between Claude Code and Amp as your AI backend
 - **Multi-Folder Support** - Work on multiple projects simultaneously with isolated state
-- **Live Streaming** - Watch Claude's output in real-time as it works
+- **Live Streaming** - Watch AI output in real-time as it works
 - **Session Persistence** - Pause and resume AI sessions without losing context
 
 ## Requirements
 
 - macOS (Apple Silicon or Intel)
-- [Claude Code](https://claude.com/product/claude-code) installed and authenticated (support for other AI coding CLIs coming soon)
+- One of the following AI coding CLIs installed and authenticated:
+  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+  - [Amp](https://ampcode.com)
 
 ## Development
 

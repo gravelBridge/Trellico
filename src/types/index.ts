@@ -1,4 +1,4 @@
-export interface ClaudeMessage {
+export interface AIMessage {
   type: string;
   subtype?: string;
   message?: {
@@ -17,12 +17,26 @@ export interface ClaudeMessage {
   parent_tool_use_id?: string;
 }
 
+export type Provider = "claude_code" | "amp";
+
+export interface FolderSession {
+  id: string;
+  provider: string;
+  session_type: "plan" | "ralph_prd";
+  display_name: string | null;
+  created_at: string;
+  linked_plan: string | null;
+  linked_ralph_prd: string | null;
+  linked_ralph_iteration: string | null;
+}
+
 export interface SessionPlanLink {
   session_id: string;
   plan_file_name: string;
   link_type: "plan" | "ralph_prd";
   created_at: string;
   updated_at: string;
+  provider: Provider;
 }
 
 export interface RalphIteration {
@@ -30,6 +44,7 @@ export interface RalphIteration {
   session_id: string;
   status: "running" | "completed" | "stopped";
   created_at: string;
+  provider: Provider | null;
 }
 
 export interface GeneratingItem {
@@ -38,4 +53,5 @@ export interface GeneratingItem {
   type: "plan" | "ralph_prd";
   sessionId: string;       // Session ID (starts as __pending__${id}, updated when real ID received)
   targetName?: string;     // For ralph_prd: the expected prd name (plan filename)
+  provider?: Provider;     // Provider used for this session (for enforcing provider match on continue)
 }

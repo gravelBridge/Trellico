@@ -1,6 +1,8 @@
 mod commands;
+mod db;
 mod models;
 mod platform;
+mod providers;
 mod state;
 mod utils;
 
@@ -18,32 +20,52 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
-            commands::claude::run_claude,
-            commands::claude::stop_claude,
-            commands::claude::check_claude_available,
+            // Provider commands
+            commands::provider::run_provider,
+            commands::provider::stop_provider,
+            commands::provider::check_provider_available,
+            // Plan file commands (filesystem)
             commands::plans::setup_folder,
             commands::plans::list_plans,
             commands::plans::read_plan,
             commands::watchers::watch_plans,
-            commands::session::read_session_links,
-            commands::session::save_session_link,
-            commands::session::get_link_by_plan,
-            commands::session::update_plan_link_filename,
-            commands::session::load_session_history,
+            // Ralph PRD file commands (filesystem)
             commands::ralph::list_ralph_prds,
             commands::ralph::read_ralph_prd,
             commands::watchers::watch_ralph_prds,
-            commands::session::save_ralph_link,
-            commands::session::get_link_by_ralph_prd,
-            commands::ralph::get_ralph_iterations,
-            commands::ralph::get_all_ralph_iterations,
-            commands::ralph::save_ralph_iteration,
-            commands::ralph::update_ralph_iteration_status,
-            commands::ralph::update_ralph_iteration_session_id,
-            commands::watchers::watch_ralph_iterations,
-            commands::watchers::stop_watching_folder
+            commands::watchers::stop_watching_folder,
+            // Database commands
+            commands::db::db_save_message,
+            commands::db::db_get_session_messages,
+            commands::db::db_get_next_sequence,
+            commands::db::db_create_session,
+            commands::db::db_get_folder_sessions,
+            commands::db::db_save_session_link,
+            commands::db::db_get_link_by_plan,
+            commands::db::db_get_link_by_ralph_prd,
+            commands::db::db_update_plan_link_filename,
+            commands::db::db_save_ralph_iteration,
+            commands::db::db_update_ralph_iteration_session_id,
+            commands::db::db_update_ralph_iteration_status,
+            commands::db::db_get_ralph_iterations,
+            commands::db::db_get_all_ralph_iterations,
+            commands::db::db_get_folder_provider,
+            commands::db::db_set_folder_provider,
+            commands::db::db_update_session_display_name,
+            commands::db::db_delete_session,
+            commands::db::db_delete_ralph_prd_data
         ])
         .setup(|app| {
+            // Initialize database
+            match db::init_db() {
+                Ok(conn) => {
+                    let _ = state::DB_CONNECTION.set(conn);
+                }
+                Err(e) => {
+                    eprintln!("Failed to initialize database: {}", e);
+                }
+            }
+
             let main_window = app.get_webview_window("main").unwrap();
             platform::setup_macos_window(&main_window);
 
