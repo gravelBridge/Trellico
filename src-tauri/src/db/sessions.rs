@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub struct FolderSession {
     pub id: String,
     pub provider: String,
+    pub display_name: Option<String>,
     pub created_at: String,
     pub linked_plan: Option<String>,
 }
@@ -40,7 +41,7 @@ pub fn get_folder_sessions(
 
     let mut stmt = conn
         .prepare(
-            "SELECT s.id, s.provider, s.created_at, sl.file_name
+            "SELECT s.id, s.provider, s.display_name, s.created_at, sl.file_name
              FROM sessions s
              LEFT JOIN session_links sl ON s.id = sl.session_id AND sl.link_type = 'plan'
              WHERE s.folder_path = ?1
@@ -53,8 +54,9 @@ pub fn get_folder_sessions(
             Ok(FolderSession {
                 id: row.get(0)?,
                 provider: row.get(1)?,
-                created_at: row.get(2)?,
-                linked_plan: row.get(3)?,
+                display_name: row.get(2)?,
+                created_at: row.get(3)?,
+                linked_plan: row.get(4)?,
             })
         })
         .map_err(|e| format!("Failed to query sessions: {}", e))?
@@ -62,4 +64,44 @@ pub fn get_folder_sessions(
         .map_err(|e| format!("Failed to collect sessions: {}", e))?;
 
     Ok(sessions)
+}
+
+/// Update session display name
+pub fn update_session_display_name(
+    conn: &DbConnection,
+    session_id: &str,
+    display_name: &str,
+) -> Result<(), String> {
+    let conn = conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let now = Utc::now().to_rfc3339();
+
+    conn.execute(
+        "UPDATE sessions SET display_name = ?1, updated_at = ?2 WHERE id = ?3",
+        params![display_name, now, session_id],
+    )
+    .map_err(|e| format!("Failed to update session display name: {}", e))?;
+
+    Ok(())
+}
+
+/// Delete a session and all its related data (messages, links)
+pub fn delete_session(conn: &DbConnection, session_id: &str) -> Result<(), String> {
+    let conn = conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+    // Delete messages
+    conn.execute("DELETE FROM messages WHERE session_id = ?1", params![session_id])
+        .map_err(|e| format!("Failed to delete messages: {}", e))?;
+
+    // Delete session links
+    conn.execute(
+        "DELETE FROM session_links WHERE session_id = ?1",
+        params![session_id],
+    )
+    .map_err(|e| format!("Failed to delete session links: {}", e))?;
+
+    // Delete session
+    conn.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])
+        .map_err(|e| format!("Failed to delete session: {}", e))?;
+
+    Ok(())
 }

@@ -158,3 +158,54 @@ pub fn get_all_ralph_iterations(
 
     Ok(result)
 }
+
+/// Delete all iterations for a PRD (and their associated sessions)
+pub fn delete_prd_iterations(
+    conn: &DbConnection,
+    folder_path: &str,
+    prd_name: &str,
+) -> Result<(), String> {
+    let conn = conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+    // Get all session IDs for this PRD's iterations
+    let mut stmt = conn
+        .prepare(
+            "SELECT session_id FROM ralph_iterations
+             WHERE folder_path = ?1 AND prd_name = ?2 AND session_id IS NOT NULL",
+        )
+        .map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+    let session_ids: Vec<String> = stmt
+        .query_map(params![folder_path, prd_name], |row| row.get(0))
+        .map_err(|e| format!("Failed to query session IDs: {}", e))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    // Delete messages for all sessions
+    for session_id in &session_ids {
+        conn.execute("DELETE FROM messages WHERE session_id = ?1", params![session_id])
+            .map_err(|e| format!("Failed to delete messages: {}", e))?;
+    }
+
+    // Delete sessions
+    for session_id in &session_ids {
+        conn.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])
+            .map_err(|e| format!("Failed to delete session: {}", e))?;
+    }
+
+    // Delete the iterations
+    conn.execute(
+        "DELETE FROM ralph_iterations WHERE folder_path = ?1 AND prd_name = ?2",
+        params![folder_path, prd_name],
+    )
+    .map_err(|e| format!("Failed to delete iterations: {}", e))?;
+
+    // Delete the session link for this PRD
+    conn.execute(
+        "DELETE FROM session_links WHERE folder_path = ?1 AND file_name = ?2 AND link_type = 'ralph_prd'",
+        params![folder_path, prd_name],
+    )
+    .map_err(|e| format!("Failed to delete session link: {}", e))?;
+
+    Ok(())
+}

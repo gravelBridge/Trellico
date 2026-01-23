@@ -5,3 +5,5 @@ export { usePlans } from "./usePlans";
 export { useRalphPrds } from "./useRalphPrds";
 export { useRalphIterations } from "./useRalphIterations";
 export { useUpdater } from "./useUpdater";
+export { useGeneratingItems } from "./useGeneratingItems";
+export { useSessionManagement } from "./useSessionManagement";

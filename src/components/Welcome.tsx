@@ -66,8 +66,13 @@ export function Welcome({ onSelectFolder }: WelcomeProps) {
             </div>
             <div className="flex items-center gap-4">
               <img
-                src="/claude-code.png"
+                src="/logos/claude-code.svg"
                 alt="Claude Code"
+                className="h-6 opacity-70"
+              />
+              <img
+                src="/logos/amp-logo.svg"
+                alt="Amp"
                 className="h-6 opacity-70"
               />
             </div>

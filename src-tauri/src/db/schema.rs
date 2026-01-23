@@ -40,6 +40,7 @@ fn migrate_v1(conn: &Connection) -> Result<(), String> {
             id TEXT PRIMARY KEY,
             folder_path TEXT NOT NULL,
             provider TEXT NOT NULL DEFAULT 'claude_code',
+            display_name TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )",

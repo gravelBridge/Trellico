@@ -14,8 +14,8 @@ interface ProviderSelectorProps {
 }
 
 const PROVIDERS: { value: Provider; label: string; icon: string }[] = [
-  { value: "claude_code", label: "Claude Code", icon: "/ClaudeIcon-Rounded.svg" },
-  { value: "amp", label: "Amp", icon: "/amp-mark-color.svg" },
+  { value: "claude_code", label: "Claude Code", icon: "/logos/claude-icon.svg" },
+  { value: "amp", label: "Amp", icon: "/logos/amp-icon.svg" },
 ];
 
 export function ProviderSelector({ value, onChange, disabled }: ProviderSelectorProps) {

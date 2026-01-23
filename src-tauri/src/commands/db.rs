@@ -196,6 +196,31 @@ pub fn db_get_all_ralph_iterations(
 }
 
 // ============================================================================
+// Session Management Commands
+// ============================================================================
+
+#[tauri::command]
+pub fn db_update_session_display_name(
+    session_id: String,
+    display_name: String,
+) -> Result<(), String> {
+    let conn = get_db()?;
+    sessions::update_session_display_name(conn, &session_id, &display_name)
+}
+
+#[tauri::command]
+pub fn db_delete_session(session_id: String) -> Result<(), String> {
+    let conn = get_db()?;
+    sessions::delete_session(conn, &session_id)
+}
+
+#[tauri::command]
+pub fn db_delete_ralph_prd_data(folder_path: String, prd_name: String) -> Result<(), String> {
+    let conn = get_db()?;
+    iterations::delete_prd_iterations(conn, &folder_path, &prd_name)
+}
+
+// ============================================================================
 // Folder Settings Commands
 // ============================================================================
 

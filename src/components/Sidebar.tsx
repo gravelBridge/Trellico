@@ -1,11 +1,18 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { kebabToTitle } from "@/lib/formatting";
 import type { RalphIteration, GeneratingItem, Provider } from "@/types";
 import { FolderSelector } from "./FolderSelector";
 import { ProviderSelector } from "./ProviderSelector";
+import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 
 interface FolderOption {
   path: string;
@@ -42,6 +49,11 @@ interface SidebarProps {
   // Provider props
   provider: Provider;
   onProviderChange: (provider: Provider) => void;
+  // Session/PRD management
+  onRenameSession: (sessionId: string, currentName: string) => void;
+  onDeleteSession: (sessionId: string) => void;
+  onRenameRalphPrd: (prdName: string) => void;
+  onDeleteRalphPrd: (prdName: string) => void;
 }
 
 function SidebarToggleIcon() {
@@ -123,6 +135,10 @@ export function Sidebar({
   onAddFolder,
   provider,
   onProviderChange,
+  onRenameSession,
+  onDeleteSession,
+  onRenameRalphPrd,
+  onDeleteRalphPrd,
 }: SidebarProps) {
   const [expandedPrds, setExpandedPrds] = useState<Set<string>>(new Set());
   const [prevIterationsKeys, setPrevIterationsKeys] = useState<string[]>([]);
@@ -222,18 +238,50 @@ export function Sidebar({
                 {plans.length > 0 || generatingPlans.length > 0 ? (
                   <div className="mt-2 space-y-0.5">
                     {generatingPlans.map((item) => (
-                      <button
+                      <div
                         key={item.id}
-                        onClick={() => onSelectGeneratingItem(item)}
                         className={cn(
-                          "w-full text-left px-2 py-1.5 text-sm rounded-md transition-colors truncate",
+                          "group flex items-center rounded-md transition-colors",
                           selectedGeneratingItemId === item.id
-                            ? "bg-primary/15 text-foreground font-medium"
-                            : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                            ? "bg-primary/15"
+                            : "hover:bg-muted/50"
                         )}
                       >
-                        {item.displayName}
-                      </button>
+                        <button
+                          onClick={() => onSelectGeneratingItem(item)}
+                          className={cn(
+                            "flex-1 text-left px-2 py-1.5 text-sm truncate",
+                            selectedGeneratingItemId === item.id
+                              ? "text-foreground font-medium"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          {item.displayName}
+                        </button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              className="p-1 mr-1 rounded opacity-0 group-hover:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-opacity"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <MoreHorizontal className="w-4 h-4" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => onRenameSession(item.sessionId, item.displayName)}>
+                              <Pencil className="w-4 h-4 mr-2" />
+                              Rename
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => onDeleteSession(item.sessionId)}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     ))}
                     {plans.map((plan) => (
                       <button
@@ -279,7 +327,12 @@ export function Sidebar({
 
                       return (
                         <div key={prd}>
-                          <div className="flex items-center gap-1">
+                          <div
+                            className={cn(
+                              "group flex items-center gap-1 rounded-md transition-colors",
+                              isPrdSelected ? "bg-primary/15" : "hover:bg-muted/50"
+                            )}
+                          >
                             {hasIterations && (
                               <button
                                 onClick={() => togglePrdExpand(prd)}
@@ -291,15 +344,38 @@ export function Sidebar({
                             <button
                               onClick={() => onSelectRalphPrd(prd)}
                               className={cn(
-                                "flex-1 text-left py-1.5 text-sm rounded-md transition-colors truncate",
+                                "flex-1 text-left py-1.5 text-sm truncate",
                                 hasIterations ? "px-1" : "px-2",
                                 isPrdSelected
-                                  ? "bg-primary/15 text-foreground font-medium"
-                                  : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                  ? "text-foreground font-medium"
+                                  : "text-muted-foreground hover:text-foreground"
                               )}
                             >
                               {kebabToTitle(prd)}
                             </button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  className="p-1 mr-1 rounded opacity-0 group-hover:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-opacity"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <MoreHorizontal className="w-4 h-4" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => onRenameRalphPrd(prd)}>
+                                  <Pencil className="w-4 h-4 mr-2" />
+                                  Rename
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => onDeleteRalphPrd(prd)}
+                                  className="text-destructive focus:text-destructive"
+                                >
+                                  <Trash2 className="w-4 h-4 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                           {hasIterations && isExpanded && (
                             <div className="ml-6 space-y-0.5 mt-0.5">

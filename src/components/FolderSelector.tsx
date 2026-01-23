@@ -4,7 +4,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 
@@ -72,9 +71,9 @@ function CloseIcon() {
   );
 }
 
-function RunningDot() {
+function RunningDot({ className }: { className?: string }) {
   return (
-    <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse shrink-0" />
+    <span className={`w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse shrink-0 ${className ?? ""}`} />
   );
 }
 
@@ -102,10 +101,8 @@ export function FolderSelector({
         <SelectTrigger className="h-8 flex-1 min-w-0">
           <div className="flex items-center gap-2 min-w-0">
             <FolderIcon />
-            <SelectValue placeholder="Select folder">
-              <span className="truncate">{activeFolder?.name}</span>
-            </SelectValue>
-            {activeFolder?.isRunning && <RunningDot />}
+            <span className="truncate">{activeFolder?.name}</span>
+            {activeFolder?.isRunning && <RunningDot className="mr-1" />}
           </div>
         </SelectTrigger>
         <SelectContent position="popper" side="bottom" align="start" sideOffset={4}>

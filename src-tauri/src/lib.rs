@@ -50,7 +50,10 @@ pub fn run() {
             commands::db::db_get_ralph_iterations,
             commands::db::db_get_all_ralph_iterations,
             commands::db::db_get_folder_provider,
-            commands::db::db_set_folder_provider
+            commands::db::db_set_folder_provider,
+            commands::db::db_update_session_display_name,
+            commands::db::db_delete_session,
+            commands::db::db_delete_ralph_prd_data
         ])
         .setup(|app| {
             // Initialize database
